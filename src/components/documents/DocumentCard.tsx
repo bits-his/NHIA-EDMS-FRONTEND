@@ -1,10 +1,16 @@
 import { useNavigate } from 'react-router-dom';
 import { FileText, Clock, User, ArrowRight } from 'lucide-react';
 import { DocumentStatusBadge } from './StatusBadge';
+import { Badge } from '@/components/ui/badge';
 import { formatRelative, truncate } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { cn } from '@/utils/cn';
 import type { Document } from '@/types/document';
+
+const CATEGORY_LABEL: Record<string, string> = {
+  internal_memo: 'Internal',
+  external_correspondence: 'External',
+};
 
 interface DocumentCardProps {
   document: Document;
@@ -45,7 +51,21 @@ export function DocumentCard({ document }: DocumentCardProps) {
               {document.title}
             </h3>
           </div>
-          <DocumentStatusBadge status={document.status} size="sm" />
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <DocumentStatusBadge status={document.status} size="sm" />
+            <div className="flex flex-wrap gap-1 justify-end">
+              {document.ref_number && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono font-normal">
+                  {document.ref_number}
+                </Badge>
+              )}
+              {document.category && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                  {CATEGORY_LABEL[document.category] ?? document.category}
+                </Badge>
+              )}
+            </div>
+          </div>
         </div>
 
         {document.content ? (

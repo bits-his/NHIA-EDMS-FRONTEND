@@ -18,6 +18,7 @@ import MemoEditor from '@/components/documents/MemoEditor';
 import { documentsApi } from '@/api/documents';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
+import { isUuid } from '@/utils/uuid';
 
 const editSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500, 'Max 500 characters'),
@@ -30,10 +31,12 @@ export default function EditDocumentPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const documentIdValid = !!id && isUuid(id);
+
   const { data: document, isLoading, error } = useQuery({
     queryKey: QUERY_KEYS.document(id!),
     queryFn: () => documentsApi.getById(id!),
-    enabled: !!id,
+    enabled: documentIdValid,
   });
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors, isDirty } } = useForm<EditForm>({
@@ -44,7 +47,6 @@ export default function EditDocumentPage() {
     if (document) reset({ title: document.title, content: document.content ?? '' });
   }, [document, reset]);
 
-  const title = watch('title');
   const content = watch('content');
 
   const mutation = useMutation({
@@ -57,6 +59,24 @@ export default function EditDocumentPage() {
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
+
+  if (!documentIdValid) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/documents')}>
+          <ArrowLeft className="h-4 w-4" /> Documents
+        </Button>
+        <ErrorState
+          title="Invalid document link"
+          error={
+            new Error(
+              'This URL is not a valid document id. Use Documents in the sidebar to open a document.'
+            )
+          }
+        />
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -121,7 +141,6 @@ export default function EditDocumentPage() {
               <div className="space-y-1.5">
                 <Label>Content</Label>
                 <MemoEditor
-                  title={title}
                   value={content ?? ''}
                   onChange={(val) => setValue('content', val, { shouldDirty: true })}
                 />

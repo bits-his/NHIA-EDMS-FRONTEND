@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { CardSkeleton } from '@/components/shared/Skeleton';
 import { WorkflowStepper } from '@/components/workflows/WorkflowStepper';
+import { WorkflowChainVisual } from '@/components/template-builder/WorkflowChainVisual';
 import { workflowsApi } from '@/api/workflows';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDate } from '@/utils/formatters';
@@ -34,6 +35,19 @@ export default function WorkflowsPage() {
           <strong>How it works:</strong> You don't create a workflow directly. When submitting a document, pick a template and a workflow instance starts automatically. Each step assigns a task to the relevant role.
         </AlertDescription>
       </Alert>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Workflow template configuration</CardTitle>
+          <p className="text-sm text-muted-foreground font-normal">
+            Reusable approval chains and routing concepts — these patterns integrate with the workflow engine when
+            templates are defined or extended.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <WorkflowChainVisual />
+        </CardContent>
+      </Card>
 
       {error ? (
         <ErrorState error={error} onRetry={refetch} />

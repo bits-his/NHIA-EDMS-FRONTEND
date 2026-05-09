@@ -16,7 +16,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { documentsApi } from '@/api/documents';
 import { canCreateDocument } from '@/utils/permissions';
 import { QUERY_KEYS } from '@/utils/constants';
-import type { DocumentStatus } from '@/types/document';
+import type { DocumentCategory, DocumentStatus } from '@/types/document';
 import { cn } from '@/utils/cn';
 
 const STATUS_ORDER: Record<DocumentStatus, number> = {
@@ -27,20 +27,40 @@ export default function DocumentsPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const [search, setSearch] = useState('');
+  const [refFilter, setRefFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<DocumentCategory | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all');
 
+  const useServerSearch = Boolean(
+    search.trim() ||
+      refFilter.trim() ||
+      categoryFilter !== 'all' ||
+      dateFrom.trim() ||
+      dateTo.trim()
+  );
+
+  const searchFilters = {
+    ...(search.trim() ? { keyword: search.trim() } : {}),
+    ...(refFilter.trim() ? { ref_number: refFilter.trim() } : {}),
+    ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}),
+    ...(dateFrom.trim() ? { date_from: `${dateFrom.trim()}T00:00:00.000Z` } : {}),
+    ...(dateTo.trim() ? { date_to: `${dateTo.trim()}T23:59:59.999Z` } : {}),
+  };
+
   const { data: allDocuments, isLoading, error, refetch } = useQuery({
-    queryKey: [QUERY_KEYS.allDocuments],
-    queryFn: () => documentsApi.listAll(),
+    queryKey: useServerSearch
+      ? QUERY_KEYS.documentsSearch(searchFilters)
+      : [QUERY_KEYS.allDocuments],
+    queryFn: () =>
+      useServerSearch ? documentsApi.search(searchFilters) : documentsApi.listAll(),
     staleTime: 30_000,
   });
 
   const filtered = (allDocuments ?? []).filter((doc) => {
-    const matchesSearch = !search ||
-      doc.title.toLowerCase().includes(search.toLowerCase()) ||
-      doc.content?.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    return matchesStatus;
   });
 
   const sorted = [...filtered].sort(
@@ -48,7 +68,13 @@ export default function DocumentsPage() {
   );
 
   const pendingCount = (allDocuments ?? []).filter((d) => d.status === 'pending').length;
-  const hasFilters = search || statusFilter !== 'all';
+  const hasFilters =
+    search ||
+    refFilter ||
+    dateFrom ||
+    dateTo ||
+    categoryFilter !== 'all' ||
+    statusFilter !== 'all';
 
   return (
     <div className="space-y-5">
@@ -102,6 +128,39 @@ export default function DocumentsPage() {
         </div>
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Reference #"
+            value={refFilter}
+            onChange={(e) => setRefFilter(e.target.value)}
+            className="w-40"
+          />
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-[140px]"
+            title="Created from"
+          />
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-[140px]"
+            title="Created to"
+          />
+          <Select
+            value={categoryFilter}
+            onValueChange={(v) => setCategoryFilter(v as DocumentCategory | 'all')}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              <SelectItem value="internal_memo">Internal memo</SelectItem>
+              <SelectItem value="external_correspondence">External</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as DocumentStatus | 'all')}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder="All statuses" />
@@ -117,7 +176,7 @@ export default function DocumentsPage() {
           </Select>
         </div>
         {hasFilters && (
-          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setStatusFilter('all'); }}>
+          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setRefFilter(''); setDateFrom(''); setDateTo(''); setCategoryFilter('all'); setStatusFilter('all'); }}>
             <X className="h-3.5 w-3.5" /> Clear
           </Button>
         )}

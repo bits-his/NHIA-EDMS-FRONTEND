@@ -5,27 +5,81 @@ export type DocumentStatus =
   | 'rejected'
   | 'archived';
 
+export type DocumentCategory = 'internal_memo' | 'external_correspondence';
+
+export type DocumentUrgency = 'normal' | 'urgent' | 'very_urgent';
+
+export type RecipientType = 'to' | 'cc' | 'bcc';
+
 export interface Document {
   id: string;
   title: string;
-  content?: string;
+  content?: string | null;
   status: DocumentStatus;
-  owner_id: string;
+  owner_id: string | null;
   created_at: string;
   updated_at: string;
+  category?: DocumentCategory | null;
+  ref_number?: string | null;
+  department?: string | null;
+  urgency?: DocumentUrgency | null;
+  template_id?: string | null;
+  file_path?: string | null;
+  original_filename?: string | null;
+  signatory_id?: string | null;
 }
 
 export interface DocumentVersion {
   id: string;
   document_id: string;
   version_number: number;
-  content?: string;
+  content?: string | null;
+  created_at: string;
+}
+
+export interface DocumentRecipient {
+  id: string;
+  document_id: string;
+  user_id: string;
+  recipient_type: RecipientType;
+  created_at?: string;
+}
+
+export interface DocumentAttachment {
+  id: string;
+  document_id: string;
+  filename: string;
+  file_path: string;
+  file_size: number | null;
+  mime_type: string | null;
+  uploaded_by: string | null;
+  created_at?: string;
+}
+
+export interface CreateRecipientInput {
+  user_id: string;
+  recipient_type: RecipientType;
+}
+
+/** Workflow steps logged in document_actions (server). */
+export interface DocumentWorkflowAction {
+  id: string;
+  document_id: string;
+  actor_id: string | null;
+  action: string;
+  comment: string | null;
   created_at: string;
 }
 
 export interface CreateDocumentRequest {
   title: string;
   content?: string;
+  category: DocumentCategory;
+  department: string;
+  urgency?: DocumentUrgency;
+  /** Omit for auto-generated ref; must be unique when set. */
+  ref_number?: string;
+  recipients?: CreateRecipientInput[];
 }
 
 export interface UpdateDocumentRequest {
@@ -36,9 +90,18 @@ export interface UpdateDocumentRequest {
 export interface CreateDocumentResponse {
   document: Document;
   version: DocumentVersion;
+  recipients?: DocumentRecipient[];
 }
 
 export interface UpdateDocumentResponse {
   document: Document;
   version: DocumentVersion | null;
+}
+
+export interface DocumentSearchFilters {
+  ref_number?: string;
+  date_from?: string;
+  date_to?: string;
+  keyword?: string;
+  category?: DocumentCategory;
 }

@@ -2,11 +2,18 @@ import { documentClient } from './client';
 import type {
   Document,
   DocumentVersion,
+  DocumentRecipient,
+  DocumentAttachment,
+  DocumentWorkflowAction,
   CreateDocumentRequest,
   CreateDocumentResponse,
   UpdateDocumentRequest,
   UpdateDocumentResponse,
+  DocumentSearchFilters,
+  CreateRecipientInput,
 } from '@/types/document';
+import type { DocumentTemplate, SaveDocumentTemplatePayload } from '@/types/documentTemplate';
+import type { OrgScopeReferenceResponse } from '@/types/orgScope';
 
 export const documentsApi = {
   listAll: async (): Promise<Document[]> => {
@@ -14,8 +21,37 @@ export const documentsApi = {
     return res.data;
   },
 
+  search: async (filters: DocumentSearchFilters): Promise<Document[]> => {
+    const res = await documentClient.get<Document[]>('/documents/search', { params: filters });
+    return res.data;
+  },
+
   create: async (data: CreateDocumentRequest): Promise<CreateDocumentResponse> => {
     const res = await documentClient.post<CreateDocumentResponse>('/documents', data);
+    return res.data;
+  },
+
+  uploadExternal: async (
+    file: File,
+    title: string,
+    department: string,
+    options?: { ref_number?: string }
+  ): Promise<CreateDocumentResponse> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('title', title);
+    form.append('department', department);
+    if (options?.ref_number?.trim()) {
+      form.append('ref_number', options.ref_number.trim());
+    }
+    const res = await documentClient.post<CreateDocumentResponse>('/documents/upload', form);
+    return res.data;
+  },
+
+  listWorkflowActions: async (documentId: string): Promise<DocumentWorkflowAction[]> => {
+    const res = await documentClient.get<DocumentWorkflowAction[]>(
+      `/documents/${documentId}/actions`
+    );
     return res.data;
   },
 
@@ -34,23 +70,120 @@ export const documentsApi = {
     return res.data;
   },
 
+  listRecipients: async (documentId: string): Promise<DocumentRecipient[]> => {
+    const res = await documentClient.get<DocumentRecipient[]>(`/documents/${documentId}/recipients`);
+    return res.data;
+  },
+
+  addRecipient: async (documentId: string, body: CreateRecipientInput): Promise<DocumentRecipient> => {
+    const res = await documentClient.post<DocumentRecipient>(`/documents/${documentId}/recipients`, body);
+    return res.data;
+  },
+
+  listAttachments: async (documentId: string): Promise<DocumentAttachment[]> => {
+    const res = await documentClient.get<DocumentAttachment[]>(`/documents/${documentId}/attachments`);
+    return res.data;
+  },
+
+  uploadAttachment: async (documentId: string, file: File): Promise<DocumentAttachment> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await documentClient.post<DocumentAttachment>(
+      `/documents/${documentId}/attachments`,
+      form
+    );
+    return res.data;
+  },
+
+  /** Fetch preview HTML (authenticated). Caller should open via blob URL. */
+  getPreviewHtml: async (documentId: string): Promise<string> => {
+    const res = await documentClient.get<string>(`/documents/${documentId}/preview`, {
+      responseType: 'text',
+    });
+    return res.data;
+  },
+
+  downloadAttachmentBlob: async (documentId: string, attachmentId: string): Promise<Blob> => {
+    const res = await documentClient.get<Blob>(`/documents/${documentId}/attachments/${attachmentId}`, {
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+
   submit: async (id: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/submit`);
     return res.data;
   },
 
+  /** Pending → approved (no signatory gate — prefer finalApprove for official signing). */
   approve: async (id: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve`);
     return res.data;
   },
 
-  reject: async (id: string): Promise<Document> => {
-    const res = await documentClient.post<Document>(`/documents/${id}/reject`);
+  finalApprove: async (id: string, comment?: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/final-approve`, {
+      ...(comment !== undefined && comment !== '' ? { comment } : {}),
+    });
+    return res.data;
+  },
+
+  reject: async (id: string, comment: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/reject`, { comment });
+    return res.data;
+  },
+
+  editForward: async (id: string, comment?: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/edit-forward`, {
+      ...(comment !== undefined && comment !== '' ? { comment } : {}),
+    });
+    return res.data;
+  },
+
+  approveForward: async (id: string, comment?: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/approve-forward`, {
+      ...(comment !== undefined && comment !== '' ? { comment } : {}),
+    });
+    return res.data;
+  },
+
+  requestInfo: async (id: string, comment: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/request-info`, { comment });
     return res.data;
   },
 
   archive: async (id: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/archive`);
+    return res.data;
+  },
+
+  getOrgScopeReference: async (): Promise<OrgScopeReferenceResponse> => {
+    const res = await documentClient.get<OrgScopeReferenceResponse>(
+      '/documents/reference/org-scope'
+    );
+    return res.data;
+  },
+
+  listTemplates: async (): Promise<DocumentTemplate[]> => {
+    const res = await documentClient.get<DocumentTemplate[]>('/documents/templates');
+    return res.data;
+  },
+
+  getTemplate: async (id: string): Promise<DocumentTemplate> => {
+    const res = await documentClient.get<DocumentTemplate>(`/documents/templates/${id}`);
+    return res.data;
+  },
+
+  createTemplate: async (data: SaveDocumentTemplatePayload): Promise<DocumentTemplate> => {
+    const res = await documentClient.post<DocumentTemplate>('/documents/templates', data);
+    return res.data;
+  },
+
+  updateTemplate: async (
+    id: string,
+    data: Partial<SaveDocumentTemplatePayload>
+  ): Promise<DocumentTemplate> => {
+    const res = await documentClient.put<DocumentTemplate>(`/documents/templates/${id}`, data);
     return res.data;
   },
 };

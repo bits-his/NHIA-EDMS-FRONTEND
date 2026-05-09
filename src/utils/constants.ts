@@ -94,6 +94,13 @@ export const QUERY_KEYS = {
   notificationsUnread: (userId: string) => ['notifications-unread', userId],
   orchestratorStatus: (docId: string) => ['orchestrator-status', docId],
   allDocuments: 'all-documents',
+  documentRecipients: (id: string) => ['document-recipients', id],
+  documentAttachments: (id: string) => ['document-attachments', id],
+  documentsSearch: (filters: object) => ['documents-search', filters],
+  documentWorkflowActions: (id: string) => ['document-workflow-actions', id],
+  documentTemplates: 'document-templates',
+  documentTemplate: (id: string) => ['document-template', id],
+  orgScopeReference: ['org-scope-reference'] as const,
 } as const;
 
 export const OCR_ACCEPTED_TYPES = {

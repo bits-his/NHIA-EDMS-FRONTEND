@@ -11,11 +11,17 @@ import {
   Undo,
 } from 'ckeditor5';
 import 'ckeditor5/ckeditor5.css';
+import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 
 interface MemoEditorProps {
   value: string;
   onChange: (value: string) => void;
-  title?: string;
+  /** Template document type catalogue label; letterhead omits the trailing word “Template”. */
+  documentTypeLabel?: string;
+  /** Letterhead address line: zone/state from organisational scope (with `letterheadZones`). */
+  letterheadZoneCode?: string;
+  letterheadStateOfficeName?: string;
+  letterheadZones?: { code: string; name: string }[];
 }
 
 const today = new Date().toLocaleDateString('en-NG', {
@@ -40,30 +46,24 @@ const INITIAL_CONTENT = `
 <p><strong>Date:</strong> &nbsp;</p>
 `;
 
-export default function MemoEditor({ value, onChange, title }: MemoEditorProps) {
+export default function MemoEditor({
+  value,
+  onChange,
+  documentTypeLabel,
+  letterheadZoneCode,
+  letterheadStateOfficeName,
+  letterheadZones,
+}: MemoEditorProps) {
   const initialData = value || INITIAL_CONTENT;
 
   return (
     <div className="border rounded-lg bg-white shadow-sm">
-      {/* Letterhead */}
-      <div className="bg-white border-b px-8 py-6 text-center">
-        <div className="flex items-center justify-center gap-4 mb-3">
-          <img src="/logo.png" alt="NHIA Logo" className="h-16 w-16 object-contain" />
-          <div className="text-left">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Federal Republic of Nigeria</p>
-            <h1 className="text-lg font-bold text-green-800 leading-tight">
-              National Health Insurance Authority
-            </h1>
-            <p className="text-xs text-gray-600">Plot 297, Herbert Macaulay Way, Central Business District, Abuja</p>
-          </div>
-        </div>
-        <div className="border-t-4 border-green-700 mt-2 pt-2">
-          <p className="text-sm font-bold uppercase tracking-widest text-gray-700">
-            Internal Memorandum
-          </p>
-          {title && <p className="text-xs text-gray-500 mt-0.5">{title}</p>}
-        </div>
-      </div>
+      <NhiaMemoLetterhead
+        documentTypeLabel={documentTypeLabel}
+        zoneCode={letterheadZoneCode}
+        stateOfficeName={letterheadStateOfficeName}
+        zones={letterheadZones}
+      />
 
       {/* Editor — min-height ensures the editable area is always visible */}
       <div className="[&_.ck-editor__editable]:min-h-[400px] [&_.ck-editor__editable]:px-8 [&_.ck-editor__editable]:py-4">

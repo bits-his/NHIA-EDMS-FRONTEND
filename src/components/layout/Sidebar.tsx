@@ -11,8 +11,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { canAccessTemplateManagement } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -41,6 +43,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const isAdmin = user?.roles.includes('admin') ?? false;
+  const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
 
   return (
     <aside
@@ -76,7 +79,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1 scrollbar-none">
         {navItems.map(({ to, icon: Icon, label, badge }) => {
-          const isActive = location.pathname.startsWith(to);
+          const path = location.pathname;
+          const isActive =
+            to === '/documents'
+              ? path === '/documents' ||
+                path.startsWith('/documents/new') ||
+                /^\/documents\/[0-9a-f-]{36}/i.test(path)
+              : path.startsWith(to);
           const showBadge = badge && unreadCount > 0;
 
           const linkContent = (
@@ -118,6 +127,51 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
           return <div key={to}>{linkContent}</div>;
         })}
+
+        {/* ── Template management (admin / records roles) ── */}
+        {showTemplateMgmt && (
+          <>
+            {!collapsed && (
+              <div className="px-3 pt-3 pb-1">
+                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest">
+                  Governance
+                </p>
+              </div>
+            )}
+            {collapsed && <div className="my-1 mx-2 h-px bg-sidebar-border" />}
+            {(() => {
+              const to = '/template-management';
+              const Icon = Layers;
+              const label = 'Template Builder';
+              const path = location.pathname;
+              const isActive = path.startsWith('/template-management');
+              const linkContent = (
+                <NavLink
+                  to={to}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                    collapsed ? 'justify-center px-0 w-10 mx-auto' : '',
+                    isActive
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
+                  )}
+                >
+                  <Icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </NavLink>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={to} delayDuration={0}>
+                    <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+                    <TooltipContent side="right">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              }
+              return <div key={to}>{linkContent}</div>;
+            })()}
+          </>
+        )}
 
         {/* ── Admin section ── */}
         {isAdmin && (

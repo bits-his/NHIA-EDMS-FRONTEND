@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { ProtectedRoute, PublicRoute } from './guards';
+import { ProtectedRoute, PublicRoute, RoleGuard } from './guards';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/shared/PageLoader';
 
@@ -20,6 +20,8 @@ const NotificationsPage = lazy(() => import('@/pages/notifications/Notifications
 const SearchPage = lazy(() => import('@/pages/search/SearchPage'));
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
+const TemplateListPage = lazy(() => import('@/pages/template-management/TemplateListPage'));
+const CreateDocumentTemplatePage = lazy(() => import('@/pages/template-management/CreateDocumentTemplatePage'));
 
 function Wrap({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
@@ -154,6 +156,36 @@ export const router = createBrowserRouter([
         element: (
           <Wrap>
             <UsersPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'template-management',
+        element: (
+          <Wrap>
+            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+              <TemplateListPage />
+            </RoleGuard>
+          </Wrap>
+        ),
+      },
+      {
+        path: 'template-management/create',
+        element: (
+          <Wrap>
+            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+              <CreateDocumentTemplatePage />
+            </RoleGuard>
+          </Wrap>
+        ),
+      },
+      {
+        path: 'template-management/edit/:templateId',
+        element: (
+          <Wrap>
+            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+              <CreateDocumentTemplatePage />
+            </RoleGuard>
           </Wrap>
         ),
       },

@@ -1,10 +1,26 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
 import { useAuthStore as useAuthStoreRaw } from '@/stores/authStore';
 
+/**
+ * All `*_Client` instances target backend agents (REST JSON). Base URLs come from
+ * `import.meta.env.VITE_*_URL`: either absolute (`http://localhost:3002`) when
+ * `CORS_ORIGIN` is set on backends, or same-origin paths (`/proxy/document`) where
+ * the Vite dev server proxies to those ports — same backend routes either way.
+ *
+ * Document agent URLs in `documentsApi` always include the `/documents/...` prefix.
+ * If `VITE_DOCUMENT_URL` mistakenly ends with `/documents`, path joins can duplicate
+ * segments — strip a trailing `/documents` suffix from the base URL.
+ */
+function normalizeDocumentAgentBaseUrl(url: string): string {
+  let u = url.trim().replace(/\/+$/, '');
+  u = u.replace(/\/documents$/i, '');
+  return u;
+}
+
 const URLS = {
   orchestrator: import.meta.env.VITE_ORCHESTRATOR_URL ?? 'http://localhost:3000',
   auth: import.meta.env.VITE_AUTH_URL ?? 'http://localhost:3001',
-  document: import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:3002',
+  document: normalizeDocumentAgentBaseUrl(import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:3002'),
   workflow: import.meta.env.VITE_WORKFLOW_URL ?? 'http://localhost:3003',
   task: import.meta.env.VITE_TASK_URL ?? 'http://localhost:3004',
   audit: import.meta.env.VITE_AUDIT_URL ?? 'http://localhost:3005',

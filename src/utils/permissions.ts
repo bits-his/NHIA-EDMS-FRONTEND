@@ -2,6 +2,8 @@ import type { DocumentStatus } from '@/types/document';
 
 /**
  * Determines which document actions are available based on current status and user roles.
+ * Aligns with document agent routes: final-approve (signatory gate on server), reject (comment),
+ * edit-forward / approve-forward / request-info, submit, archive.
  */
 export function getDocumentActions(
   status: DocumentStatus,
@@ -9,20 +11,30 @@ export function getDocumentActions(
 ): {
   canEdit: boolean;
   canSubmit: boolean;
-  canApprove: boolean;
+  canFinalApprove: boolean;
   canReject: boolean;
   canArchive: boolean;
+  canEditForward: boolean;
+  canApproveForward: boolean;
+  canRequestInfo: boolean;
 } {
   const isAdmin = roles.includes('admin');
   const isReviewer = roles.includes('reviewer');
   const isSubmitter = roles.includes('submitter');
+  const isDirector = roles.includes('director');
+  const reviewerLike = isAdmin || isReviewer || isDirector;
 
   return {
     canEdit: status === 'draft' && (isAdmin || isSubmitter),
     canSubmit: status === 'draft' && (isAdmin || isSubmitter),
-    canApprove: status === 'pending' && (isAdmin || isReviewer),
-    canReject: status === 'pending' && (isAdmin || isReviewer),
+    canFinalApprove: status === 'pending' && reviewerLike,
+    canReject: status === 'pending' && reviewerLike,
     canArchive: status === 'approved' && isAdmin,
+    canEditForward:
+      (status === 'draft' || status === 'pending') &&
+      (isAdmin || isSubmitter || isReviewer || isDirector),
+    canApproveForward: status === 'pending' && reviewerLike,
+    canRequestInfo: status === 'pending' && reviewerLike,
   };
 }
 
@@ -31,7 +43,7 @@ export function canCreateDocument(roles: string[]): boolean {
 }
 
 export function canViewAuditLogs(_roles: string[]): boolean {
-  return true; // All authenticated users
+  return true;
 }
 
 export function canIndexSearch(roles: string[]): boolean {
@@ -40,4 +52,9 @@ export function canIndexSearch(roles: string[]): boolean {
 
 export function canAdvanceWorkflow(roles: string[]): boolean {
   return roles.includes('admin') || roles.includes('reviewer');
+}
+
+/** Enterprise template builder — administrators & records / submission roles. */
+export function canAccessTemplateManagement(roles: string[]): boolean {
+  return roles.some((r) => ['admin', 'submitter', 'director'].includes(r));
 }

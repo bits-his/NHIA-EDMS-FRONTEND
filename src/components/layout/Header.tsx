@@ -29,8 +29,10 @@ const ROUTE_LABELS: Record<string, string> = {
   settings:      'Settings',
   new:           'New',
   edit:          'Edit',
-  admin:         'Admin',
-  users:         'User Management',
+  admin:               'Admin',
+  users:               'User Management',
+  'template-management': 'Template Management',
+  create:              'Create Template',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
