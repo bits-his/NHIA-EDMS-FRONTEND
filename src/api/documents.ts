@@ -186,4 +186,8 @@ export const documentsApi = {
     const res = await documentClient.put<DocumentTemplate>(`/documents/templates/${id}`, data);
     return res.data;
   },
+
+  deleteTemplate: async (id: string): Promise<void> => {
+    await documentClient.delete(`/documents/templates/${id}`);
+  },
 };

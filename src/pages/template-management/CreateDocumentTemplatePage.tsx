@@ -22,6 +22,7 @@ import {
   Eye,
   ChevronRight,
   History,
+  Trash2,
 } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -143,6 +144,7 @@ export default function CreateDocumentTemplatePage() {
   const previewAsideRef = useRef<HTMLDivElement>(null);
   const duplicateHydrated = useRef(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const docTypeLabel = useMemo(() => findDocTypeLabel(docType), [docType]);
   const scopeLabel = useMemo(() => findScopeLabel(scopeLevel), [scopeLevel]);
@@ -362,6 +364,18 @@ export default function CreateDocumentTemplatePage() {
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => documentsApi.deleteTemplate(templateId!),
+    onSuccess: () => {
+      setDeleteDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.documentTemplates] });
+      if (templateId) queryClient.removeQueries({ queryKey: QUERY_KEYS.documentTemplate(templateId) });
+      toast.success('Template deleted.');
+      navigate('/template-management');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
   const appendPlaceholder = (token: string) => {
     setContent((c) => `${c}<p>${token}</p>`);
     toast.message(`Inserted ${token}`);
@@ -414,7 +428,8 @@ export default function CreateDocumentTemplatePage() {
     previewAsideRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const saving = saveMutation.isPending || archiveMutation.isPending;
+  const saving =
+    saveMutation.isPending || archiveMutation.isPending || deleteMutation.isPending;
 
   if (templateId && templateLoadError) {
     return (
@@ -1062,6 +1077,39 @@ export default function CreateDocumentTemplatePage() {
         </DialogPortal>
       </DialogRoot>
 
+      <DialogRoot open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogPortal>
+          <DialogOverlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          <DialogContent className="fixed left-[50%] top-[50%] z-50 w-[min(100vw-2rem,24rem)] max-w-[calc(100vw-2rem)] translate-x-[-50%] translate-y-[-50%] rounded-xl border border-border bg-background p-4 shadow-xl focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
+            <DialogTitle className="text-lg font-semibold">Delete template?</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground mt-2">
+              This permanently removes “{name.trim() || 'this template'}” from the catalogue. You cannot
+              delete a template that is already linked to documents.
+            </DialogDescription>
+            <div className="flex justify-end gap-2 mt-6">
+              <DialogClose asChild>
+                <Button variant="outline" size="sm" disabled={deleteMutation.isPending}>
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleteMutation.isPending}
+                onClick={() => templateId && deleteMutation.mutate()}
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4 mr-1.5" />
+                )}
+                Delete
+              </Button>
+            </div>
+          </DialogContent>
+        </DialogPortal>
+      </DialogRoot>
+
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-md py-3 px-4 md:px-8">
         <div className="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
@@ -1084,11 +1132,25 @@ export default function CreateDocumentTemplatePage() {
             <Button
               size="sm"
               variant="outline"
-              disabled={!templateId || archiveMutation.isPending}
+              disabled={!templateId || archiveMutation.isPending || deleteMutation.isPending}
               onClick={() => templateId && archiveMutation.mutate()}
             >
               <Archive className="h-4 w-4 mr-1.5" />
               Archive
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+              disabled={!templateId || deleteMutation.isPending}
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-1.5" />
+              )}
+              Delete
             </Button>
             <Button size="sm" variant="outline" onClick={handleExport}>
               <Download className="h-4 w-4 mr-1.5" />

@@ -22,6 +22,7 @@ const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
 const TemplateListPage = lazy(() => import('@/pages/template-management/TemplateListPage'));
 const CreateDocumentTemplatePage = lazy(() => import('@/pages/template-management/CreateDocumentTemplatePage'));
+const WorkflowDesignerPage = lazy(() => import('@/pages/template-management/WorkflowDesignerPage'));
 
 function Wrap({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
@@ -185,6 +186,16 @@ export const router = createBrowserRouter([
           <Wrap>
             <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
               <CreateDocumentTemplatePage />
+            </RoleGuard>
+          </Wrap>
+        ),
+      },
+      {
+        path: 'template-management/workflow-designer/:templateId',
+        element: (
+          <Wrap>
+            <RoleGuard roles={['admin']} fallback={<Navigate to="/workflows" replace />}>
+              <WorkflowDesignerPage />
             </RoleGuard>
           </Wrap>
         ),

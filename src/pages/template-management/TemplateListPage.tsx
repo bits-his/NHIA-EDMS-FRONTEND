@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   Archive,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import {
   Root as DialogRoot,
@@ -108,6 +109,7 @@ export default function TemplateListPage() {
   const [assignFor, setAssignFor] = useState<DocumentTemplate | null>(null);
   const [workflowPickId, setWorkflowPickId] = useState('');
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: templates, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: [QUERY_KEYS.documentTemplates],
@@ -128,6 +130,20 @@ export default function TemplateListPage() {
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => documentsApi.deleteTemplate(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.documentTemplates] });
+      queryClient.removeQueries({ queryKey: QUERY_KEYS.documentTemplate(id) });
+      toast.success('Template deleted.');
+      setDeleteConfirmId(null);
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+
+  const deleteTargetName =
+    templates?.find((x) => x.id === deleteConfirmId)?.name?.trim() || 'this template';
 
   const assignWorkflowMutation = useMutation({
     mutationFn: ({
@@ -354,7 +370,9 @@ export default function TemplateListPage() {
                     onDuplicate={() => handleDuplicate(t)}
                     onAssignWorkflow={() => setAssignFor(t)}
                     onArchive={() => setArchiveConfirmId(t.id)}
+                    onDelete={() => setDeleteConfirmId(t.id)}
                     archiving={archiveMutation.isPending && archiveMutation.variables === t.id}
+                    deleting={deleteMutation.isPending && deleteMutation.variables === t.id}
                   />
                 ))}
               </tbody>
@@ -375,7 +393,9 @@ export default function TemplateListPage() {
                 onDuplicate={() => handleDuplicate(t)}
                 onAssignWorkflow={() => setAssignFor(t)}
                 onArchive={() => setArchiveConfirmId(t.id)}
+                onDelete={() => setDeleteConfirmId(t.id)}
                 archiving={archiveMutation.isPending && archiveMutation.variables === t.id}
+                deleting={deleteMutation.isPending && deleteMutation.variables === t.id}
               />
             ))}
           </div>
@@ -554,6 +574,17 @@ export default function TemplateListPage() {
         loading={archiveMutation.isPending}
         onConfirm={() => archiveConfirmId && archiveMutation.mutate(archiveConfirmId)}
       />
+
+      <ConfirmDialog
+        open={!!deleteConfirmId}
+        onOpenChange={(open) => !open && setDeleteConfirmId(null)}
+        title="Delete this template?"
+        description={`Permanently remove “${deleteTargetName}” from the catalogue. This cannot be undone. Templates linked to existing documents cannot be deleted.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteConfirmId && deleteMutation.mutate(deleteConfirmId)}
+      />
     </div>
   );
 }
@@ -563,17 +594,21 @@ function TemplateActionsDropdown({
   onDuplicate,
   onAssignWorkflow,
   onArchive,
+  onDelete,
   onEditTo,
   disabledArchive,
   archiving,
+  deleting,
 }: {
   onPreview: () => void;
   onDuplicate: () => void;
   onAssignWorkflow: () => void;
   onArchive: () => void;
+  onDelete: () => void;
   onEditTo: string;
   disabledArchive: boolean;
   archiving: boolean;
+  deleting: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -607,6 +642,19 @@ function TemplateActionsDropdown({
             Edit
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={onDelete}
+          disabled={deleting}
+          className="text-destructive focus:text-destructive focus:bg-destructive/10"
+        >
+          {deleting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Trash2 className="h-4 w-4 mr-2" />
+          )}
+          {deleting ? 'Deleting…' : 'Delete'}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -619,7 +667,9 @@ function TemplateTableRow({
   onDuplicate,
   onAssignWorkflow,
   onArchive,
+  onDelete,
   archiving,
+  deleting,
 }: {
   t: DocumentTemplate;
   workflowLabel: string;
@@ -627,7 +677,9 @@ function TemplateTableRow({
   onDuplicate: () => void;
   onAssignWorkflow: () => void;
   onArchive: () => void;
+  onDelete: () => void;
   archiving: boolean;
+  deleting: boolean;
 }) {
   const updated = t.updated_at ? formatDateTime(t.updated_at) : formatDateTime(t.created_at);
 
@@ -654,9 +706,11 @@ function TemplateTableRow({
           onDuplicate={onDuplicate}
           onAssignWorkflow={onAssignWorkflow}
           onArchive={onArchive}
+          onDelete={onDelete}
           onEditTo={`/template-management/edit/${t.id}`}
           disabledArchive={t.status === 'archived'}
           archiving={archiving}
+          deleting={deleting}
         />
       </td>
     </tr>
@@ -670,7 +724,9 @@ function MobileTemplateCard({
   onDuplicate,
   onAssignWorkflow,
   onArchive,
+  onDelete,
   archiving,
+  deleting,
 }: {
   t: DocumentTemplate;
   workflowLabel: string;
@@ -678,7 +734,9 @@ function MobileTemplateCard({
   onDuplicate: () => void;
   onAssignWorkflow: () => void;
   onArchive: () => void;
+  onDelete: () => void;
   archiving: boolean;
+  deleting: boolean;
 }) {
   return (
     <Card className="p-4 space-y-3">
@@ -692,9 +750,11 @@ function MobileTemplateCard({
           onDuplicate={onDuplicate}
           onAssignWorkflow={onAssignWorkflow}
           onArchive={onArchive}
+          onDelete={onDelete}
           onEditTo={`/template-management/edit/${t.id}`}
           disabledArchive={t.status === 'archived'}
           archiving={archiving}
+          deleting={deleting}
         />
       </div>
       <div className="text-xs text-muted-foreground space-y-1">

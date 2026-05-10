@@ -78,6 +78,36 @@ export const WORKFLOW_STATUS_CONFIG: Record<
     color: 'text-emerald-700 dark:text-emerald-400',
     bg: 'bg-emerald-50 dark:bg-emerald-900/30',
   },
+  rejected: {
+    label: 'Rejected',
+    color: 'text-red-700 dark:text-red-400',
+    bg: 'bg-red-50 dark:bg-red-900/30',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    color: 'text-slate-700 dark:text-slate-400',
+    bg: 'bg-slate-100 dark:bg-slate-900/40',
+  },
+  returned_for_correction: {
+    label: 'Returned',
+    color: 'text-amber-800 dark:text-amber-400',
+    bg: 'bg-amber-50 dark:bg-amber-900/25',
+  },
+  in_progress: {
+    label: 'In progress',
+    color: 'text-blue-700 dark:text-blue-400',
+    bg: 'bg-blue-50 dark:bg-blue-900/30',
+  },
+  pending_approval: {
+    label: 'Pending approval',
+    color: 'text-amber-700 dark:text-amber-400',
+    bg: 'bg-amber-50 dark:bg-amber-900/30',
+  },
+  pending_review: {
+    label: 'Pending review',
+    color: 'text-amber-700 dark:text-amber-400',
+    bg: 'bg-amber-50 dark:bg-amber-900/30',
+  },
 };
 
 export const QUERY_KEYS = {
@@ -86,6 +116,7 @@ export const QUERY_KEYS = {
   documentVersions: (id: string) => ['document-versions', id],
   workflows: 'workflows',
   workflowTemplates: 'workflow-templates',
+  workflowTemplateVersions: (templateId: string) => ['workflow-template-versions', templateId],
   workflow: (id: string) => ['workflow', id],
   tasks: (assigneeId: string) => ['tasks', assigneeId],
   task: (id: string) => ['task', id],
