@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ChevronLeft,
   ChevronRight,
   Copy,
   Eye,
@@ -92,11 +93,16 @@ const STATUS_STYLE: Record<string, string> = {
   archived: 'bg-muted text-muted-foreground',
 };
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 20;
+
 export default function TemplateListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | DocumentTemplateStatus>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const [previewTemplate, setPreviewTemplate] = useState<DocumentTemplate | null>(null);
   const [assignFor, setAssignFor] = useState<DocumentTemplate | null>(null);
@@ -160,6 +166,25 @@ export default function TemplateListPage() {
       return name.includes(q) || cat.includes(q) || dept.includes(q) || code.includes(q);
     });
   }, [templates, search, statusFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(Math.max(1, page), pageCount);
+
+  const paginated = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, safePage, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, pageSize]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = filtered.length === 0 ? 0 : Math.min(safePage * pageSize, filtered.length);
 
   const workflowNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -316,7 +341,7 @@ export default function TemplateListPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((t) => (
+                {paginated.map((t) => (
                   <TemplateTableRow
                     key={t.id}
                     t={t}
@@ -337,7 +362,7 @@ export default function TemplateListPage() {
           </div>
 
           <div className="md:hidden space-y-3">
-            {filtered.map((t) => (
+            {paginated.map((t) => (
               <MobileTemplateCard
                 key={t.id}
                 t={t}
@@ -355,9 +380,79 @@ export default function TemplateListPage() {
             ))}
           </div>
 
-          <p className="text-xs text-muted-foreground text-center md:text-left">
-            Showing {filtered.length} of {templates.length} template{templates.length !== 1 ? 's' : ''}
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border border-border/80 rounded-lg bg-muted/20 px-3 py-3">
+            <p className="text-xs text-muted-foreground order-2 sm:order-1">
+              {filtered.length === 0 ? (
+                <>No rows</>
+              ) : (
+                <>
+                  Showing{' '}
+                  <span className="tabular-nums text-foreground font-medium">
+                    {rangeStart}–{rangeEnd}
+                  </span>{' '}
+                  of{' '}
+                  <span className="tabular-nums text-foreground font-medium">{filtered.length}</span>
+                  {templates && filtered.length !== templates.length ? (
+                    <>
+                      {' '}
+                      matching ({templates.length} in catalogue)
+                    </>
+                  ) : (
+                    <> template{filtered.length !== 1 ? 's' : ''}</>
+                  )}
+                </>
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-2 justify-between sm:justify-end order-1 sm:order-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="tpl-page-size" className="text-xs text-muted-foreground whitespace-nowrap">
+                  Per page
+                </Label>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v))}
+                >
+                  <SelectTrigger id="tpl-page-size" className="h-8 w-[72px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-xs text-muted-foreground tabular-nums px-2 min-w-[5.5rem] text-center">
+                  Page {safePage} of {pageCount}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  disabled={safePage >= pageCount}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
         </>
       )}
 

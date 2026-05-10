@@ -1,8 +1,15 @@
 /** Sample substitutions for `{{…}}` tokens — preview only; generation replaces at runtime. */
 
 const PREVIEW_SAMPLES: Record<string, string> = {
+  agency_name: 'National Health Insurance Authority (NHIA)',
+  staff_id: 'NHIA/HR/10248',
+  applicant_name: 'Mr. Adamu Bello',
   staff_name: 'Ms. Chinelo Okafor',
   name: 'Dr. Ibrahim Musa',
+  designation: 'Chief Administrative Officer',
+  prepared_by: 'Mrs. Ngozi Eze — Planning Unit',
+  fiscal_year: '2026',
+  reporting_period: 'Q1 2026',
   department: 'Corporate Services',
   approval_date: '9 May 2026',
   reference_number: 'NHIA/MEMO/2026/00123',
