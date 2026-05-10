@@ -45,3 +45,34 @@ export function defaultCustomWorkflowSteps(): Array<{
     },
   ];
 }
+
+/** Normalize API template steps into editor drafts (sorted by step_number). */
+export function templateStepsToDraft(
+  steps: Array<{
+    step_number?: number;
+    step?: number;
+    name: string;
+    assignee_role: string;
+    action_type?: string;
+  }>
+): Array<{ name: string; assignee_role: string; action_type: string }> {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return defaultCustomWorkflowSteps().map(({ name, assignee_role, action_type }) => ({
+      name,
+      assignee_role,
+      action_type,
+    }));
+  }
+  const withOrder = steps.map((s, idx) => ({
+    name: s.name,
+    assignee_role: s.assignee_role,
+    action_type: s.action_type || 'approve',
+    order: Number(s.step_number ?? s.step ?? idx + 1),
+  }));
+  withOrder.sort((a, b) => a.order - b.order);
+  return withOrder.map(({ name, assignee_role, action_type }) => ({
+    name,
+    assignee_role,
+    action_type,
+  }));
+}

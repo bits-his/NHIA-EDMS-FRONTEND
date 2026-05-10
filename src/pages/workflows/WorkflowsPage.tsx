@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   List,
   Eye,
+  Pencil,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,12 +24,14 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { CardSkeleton } from '@/components/shared/Skeleton';
 import { WorkflowStepper } from '@/components/workflows/WorkflowStepper';
-import { CreateCustomWorkflowDialog } from '@/components/workflows/CreateCustomWorkflowDialog';
+import { WorkflowEditorDialog } from '@/components/workflows/WorkflowEditorDialog';
 import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDate } from '@/utils/formatters';
 
 type ViewMode = 'grid' | 'list';
+
+type EditorState = null | { mode: 'create' } | { mode: 'edit'; templateId: string };
 
 const CUSTOM_WORKFLOW_CREATOR_ROLES = new Set(['admin', 'director', 'submitter']);
 
@@ -38,7 +41,7 @@ export default function WorkflowsPage() {
   const canCreateCustomWorkflow = roles.some((r) => CUSTOM_WORKFLOW_CREATOR_ROLES.has(r));
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>('grid');
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editor, setEditor] = useState<EditorState>(null);
 
   const { data: templates, isLoading, error, refetch } = useQuery({
     queryKey: [QUERY_KEYS.workflowTemplates],
@@ -64,17 +67,20 @@ export default function WorkflowsPage() {
           description="Approval process templates — select one when submitting a document, or create your own linear route."
         />
         {canCreateCustomWorkflow ? (
-          <Button type="button" className="shrink-0 gap-2 w-fit" onClick={() => setCreateDialogOpen(true)}>
+          <Button type="button" className="shrink-0 gap-2 w-fit" onClick={() => setEditor({ mode: 'create' })}>
             <Plus className="h-4 w-4" />
             Custom workflow
           </Button>
         ) : null}
       </div>
 
-      <CreateCustomWorkflowDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
+      <WorkflowEditorDialog
+        open={editor !== null}
+        onOpenChange={(o) => !o && setEditor(null)}
+        mode={editor?.mode ?? 'create'}
+        templateId={editor?.mode === 'edit' ? editor.templateId : undefined}
         onCreated={(templateId) => navigate(`/documents/new?template_id=${templateId}`)}
+        onSaved={() => refetch()}
       />
 
       <Alert variant="info">
@@ -150,7 +156,7 @@ export default function WorkflowsPage() {
           />
           {canCreateCustomWorkflow ? (
             <div className="flex justify-center">
-              <Button type="button" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
+              <Button type="button" className="gap-2" onClick={() => setEditor({ mode: 'create' })}>
                 <Plus className="h-4 w-4" />
                 Create custom workflow
               </Button>
@@ -240,6 +246,15 @@ export default function WorkflowsPage() {
                       >
                         <Eye className="h-3.5 w-3.5" /> View flow
                       </Button>
+                      {canCreateCustomWorkflow ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditor({ mode: 'edit', templateId: template.id })}
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> Edit
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="soft-primary"
@@ -296,6 +311,15 @@ export default function WorkflowsPage() {
                     >
                       <Eye className="h-3.5 w-3.5" /> View flow
                     </Button>
+                    {canCreateCustomWorkflow ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditor({ mode: 'edit', templateId: template.id })}
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="soft-primary"

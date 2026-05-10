@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Eye, GitBranch } from 'lucide-react';
+import { ArrowLeft, Eye, GitBranch, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -8,13 +9,20 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { WorkflowFlowchartView } from '@/components/workflows/WorkflowFlowchartView';
+import { WorkflowEditorDialog } from '@/components/workflows/WorkflowEditorDialog';
 import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { isUuid } from '@/utils/uuid';
+import { useAuthStore } from '@/stores/authStore';
+
+const CUSTOM_WORKFLOW_CREATOR_ROLES = new Set(['admin', 'director', 'submitter']);
 
 export default function WorkflowTemplateDesignPage() {
   const { templateId } = useParams<{ templateId: string }>();
   const navigate = useNavigate();
+  const roles = useAuthStore((s) => s.user?.roles) ?? [];
+  const canEditWorkflow = roles.some((r) => CUSTOM_WORKFLOW_CREATOR_ROLES.has(r));
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const valid = !!templateId && isUuid(templateId);
 
   const {
@@ -64,6 +72,17 @@ export default function WorkflowTemplateDesignPage() {
         description="Read-only visualization of the linear approval path for this template."
       />
 
+      <WorkflowEditorDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        mode="edit"
+        templateId={templateId}
+        onSaved={() => {
+          refetch();
+          refetchView();
+        }}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary" className="gap-1 font-normal">
           <Eye className="h-3 w-3" />
@@ -78,6 +97,12 @@ export default function WorkflowTemplateDesignPage() {
         {view?.engine_mode && (
           <span className="text-[11px] text-muted-foreground capitalize">engine {view.engine_mode}</span>
         )}
+        {canEditWorkflow ? (
+          <Button type="button" size="sm" variant="secondary" className="gap-1.5" onClick={() => setEditDialogOpen(true)}>
+            <Pencil className="h-3.5 w-3.5" />
+            Edit workflow
+          </Button>
+        ) : null}
       </div>
 
       <Alert>

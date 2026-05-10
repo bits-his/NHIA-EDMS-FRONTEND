@@ -124,3 +124,8 @@ export interface CreateWorkflowTemplatePayload {
   name: string;
   steps: WorkflowStepDefinition[];
 }
+
+export interface UpdateWorkflowTemplatePayload {
+  name?: string;
+  steps?: WorkflowStepDefinition[];
+}

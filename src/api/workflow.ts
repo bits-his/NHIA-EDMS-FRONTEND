@@ -5,6 +5,7 @@ import type {
   WorkflowInstanceStepRow,
   WorkflowTemplateSummary,
   CreateWorkflowTemplatePayload,
+  UpdateWorkflowTemplatePayload,
 } from '@/types/workflow';
 
 export const workflowApi = {
@@ -15,6 +16,17 @@ export const workflowApi = {
 
   createTemplate: async (payload: CreateWorkflowTemplatePayload): Promise<WorkflowTemplateSummary> => {
     const res = await workflowClient.post<WorkflowTemplateSummary>('/workflows/templates', payload);
+    return res.data;
+  },
+
+  updateTemplate: async (
+    templateId: string,
+    payload: UpdateWorkflowTemplatePayload
+  ): Promise<WorkflowTemplateSummary> => {
+    const res = await workflowClient.put<WorkflowTemplateSummary>(
+      `/workflows/templates/${templateId}`,
+      payload
+    );
     return res.data;
   },
 
