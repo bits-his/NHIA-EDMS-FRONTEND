@@ -6,7 +6,6 @@ import {
   Clock,
   User,
   FileText,
-  GitBranch,
   Shield,
   Hash,
   Eye,
@@ -17,6 +16,7 @@ import {
   Zap,
   Upload,
   Download,
+  GitBranch,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -45,13 +45,11 @@ import { Skeleton } from '@/components/shared/Skeleton';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { DocumentActions } from '@/components/documents/DocumentActions';
 import { DocumentActivitySidebar } from '@/components/documents/DocumentActivitySidebar';
+import { WorkflowBpmnPanel } from '@/components/documents/WorkflowBpmnPanel';
 import { VersionHistory } from '@/components/documents/VersionHistory';
 import { AuditTimeline } from '@/components/audit/AuditTimeline';
-import { WorkflowStepper } from '@/components/workflows/WorkflowStepper';
 import { documentsApi } from '@/api/documents';
 import { auditApi } from '@/api/audit';
-import { orchestratorApi } from '@/api/orchestrator';
-import { workflowsApi } from '@/api/workflows';
 import { authApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { QUERY_KEYS } from '@/utils/constants';
@@ -97,24 +95,6 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid,
   });
 
-  const { data: orchestratorStatus } = useQuery({
-    queryKey: QUERY_KEYS.orchestratorStatus(id!),
-    queryFn: () => orchestratorApi.getStatus(id!),
-    enabled: documentIdValid,
-  });
-
-  const { data: workflowInstance } = useQuery({
-    queryKey: QUERY_KEYS.workflow(orchestratorStatus?.workflow?.id ?? ''),
-    queryFn: () => workflowsApi.getById(orchestratorStatus!.workflow!.id),
-    enabled: !!orchestratorStatus?.workflow?.id,
-  });
-
-  const { data: workflowTemplates } = useQuery({
-    queryKey: [QUERY_KEYS.workflowTemplates],
-    queryFn: () => workflowsApi.getTemplates(),
-    enabled: !!workflowInstance,
-  });
-
   const { data: recipients } = useQuery({
     queryKey: QUERY_KEYS.documentRecipients(id!),
     queryFn: () => documentsApi.listRecipients(id!),
@@ -138,8 +118,6 @@ export default function DocumentDetailPage() {
     queryFn: () => authApi.listUsers(),
     enabled: recipientOpen,
   });
-
-  const template = workflowTemplates?.find((t) => t.id === workflowInstance?.template_id);
 
   const previewMutation = useMutation({
     mutationFn: () => documentsApi.getPreviewHtml(id!),
@@ -384,11 +362,11 @@ export default function DocumentDetailPage() {
               <TabsTrigger value="versions">
                 <Hash className="h-3.5 w-3.5" /> Versions {versions ? `(${versions.length})` : ''}
               </TabsTrigger>
-              <TabsTrigger value="workflow">
-                <GitBranch className="h-3.5 w-3.5" /> Workflow
-              </TabsTrigger>
               <TabsTrigger value="audit">
                 <Shield className="h-3.5 w-3.5" /> Audit {auditLogs ? `(${auditLogs.length})` : ''}
+              </TabsTrigger>
+              <TabsTrigger value="workflow">
+                <GitBranch className="h-3.5 w-3.5" /> Workflow
               </TabsTrigger>
             </TabsList>
 
@@ -456,70 +434,6 @@ export default function DocumentDetailPage() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="workflow">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" /> Workflow Status
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {orchestratorStatus?.workflow ? (
-                    <div className="space-y-5">
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Workflow ID</p>
-                          <p className="text-sm font-mono text-muted-foreground">
-                            {orchestratorStatus.workflow.id.slice(0, 8)}…
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Status</p>
-                          <span
-                            className={`text-sm font-semibold capitalize ${orchestratorStatus.workflow.status === 'completed' ? 'text-emerald-600' : 'text-blue-600'}`}
-                          >
-                            {orchestratorStatus.workflow.status}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Current Step</p>
-                          <p className="text-sm font-semibold">
-                            Step {orchestratorStatus.workflow.current_step}
-                          </p>
-                        </div>
-                      </div>
-                      {template && workflowInstance && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-3">
-                            Template:{' '}
-                            <span className="font-medium text-foreground">{template.name}</span>
-                          </p>
-                          <WorkflowStepper steps={template.steps} instance={workflowInstance} />
-                        </div>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate(`/workflows/${orchestratorStatus.workflow!.id}`)}
-                      >
-                        <GitBranch className="h-4 w-4" /> Open Workflow
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center py-10 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mb-3">
-                        <GitBranch className="h-6 w-6 text-muted-foreground" strokeWidth={1.5} />
-                      </div>
-                      <p className="text-sm font-medium text-foreground">No workflow started</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Start a workflow from create flow or workflow screens.
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
             <TabsContent value="audit">
               <Card>
                 <CardHeader>
@@ -529,6 +443,23 @@ export default function DocumentDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <AuditTimeline logs={auditLogs ?? []} loading={auditLoading} />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="workflow">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <GitBranch className="h-4 w-4" /> BPMN routing & approvals
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground font-normal">
+                    Read-only view of the workflow engine path (linear orchestration). Approvals and transitions
+                    continue to run through existing APIs.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <WorkflowBpmnPanel documentId={doc.id} documentStatus={doc.status} />
                 </CardContent>
               </Card>
             </TabsContent>

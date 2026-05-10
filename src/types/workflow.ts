@@ -1,95 +1,88 @@
-export type WorkflowStatus =
+export type WorkflowInstanceStatus =
   | 'active'
   | 'completed'
   | 'rejected'
   | 'cancelled'
   | 'returned_for_correction'
-  | 'in_progress'
-  | 'pending_approval'
-  | 'pending_review';
-
-export interface WorkflowStep {
-  step_number: number;
-  name: string;
-  assignee_role: string;
-  action_type: string;
-}
-
-export type WorkflowGraphNodeType =
-  | 'approval'
-  | 'review'
-  | 'condition'
-  | 'notification'
-  | 'hq_escalation'
-  | 'parallel'
-  | 'archive'
-  | 'auto_approval';
-
-export interface WorkflowGraphNode {
-  id: string;
-  type: WorkflowGraphNodeType;
-  label?: string;
-  assignee_role?: string;
-  assignee_scope?:
-    | 'unit'
-    | 'department'
-    | 'directorate'
-    | 'state_office'
-    | 'zone'
-    | 'hq'
-    | 'executive'
-    | 'inter_agency';
-  sla_hours?: number;
-  escalation_role?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowGraphEdge {
-  id: string;
-  from: string;
-  to: string;
-  condition?: string | null;
-}
-
-/** Canonical graph definition stored in workflow_template_versions.definition (JSONB). */
-export interface WorkflowDefinition {
-  schemaVersion: number;
-  entry_node_id: string;
-  nodes: WorkflowGraphNode[];
-  edges: WorkflowGraphEdge[];
-  variables?: Record<string, unknown>;
-}
-
-export interface WorkflowTemplate {
-  id: string;
-  name: string;
-  steps: WorkflowStep[];
-  created_at: string;
-  published_version_id?: string | null;
-}
-
-export interface WorkflowTemplateVersion {
-  id: string;
-  template_id: string;
-  version_number: number;
-  status: 'draft' | 'published' | 'archived';
-  definition: WorkflowDefinition;
-  changelog?: string | null;
-  created_at: string;
-  published_at?: string | null;
-}
+  | string;
 
 export interface WorkflowInstance {
   id: string;
   template_id: string;
   document_id: string;
-  status: WorkflowStatus;
+  status: WorkflowInstanceStatus;
   current_step: number;
-  created_at: string;
-  updated_at: string;
   engine_mode?: string;
-  template_version_id?: string | null;
   runtime_state?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BpmnSemanticBadge {
+  symbol: string;
+  label: string;
+  palette: string;
+}
+
+export interface BpmnWorkflowElement {
+  id: string;
+  kind: string;
+  bpmnKind?: string;
+  title: string;
+  step_number?: number;
+  assignee_role?: string;
+  action_type?: string;
+  phase?: string;
+  badge?: BpmnSemanticBadge;
+  decision_branches?: Array<{
+    key: string;
+    symbol: string;
+    label: string;
+    edge_kind?: string;
+  }>;
+}
+
+export interface BpmnTerminalElement {
+  id: string;
+  kind: string;
+  title: string;
+  phase?: string;
+  semantic?: string;
+  symbol?: string;
+  description?: string;
+}
+
+export interface BpmnConnection {
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
+  direction: string;
+  label?: string;
+}
+
+export interface WorkflowBpmnView {
+  schema: string;
+  engine_mode?: string;
+  swimlane_id?: string;
+  legend: Record<string, string>;
+  standardized_states?: string[];
+  elements: BpmnWorkflowElement[];
+  terminal: BpmnTerminalElement | null;
+  connections: BpmnConnection[];
+  annotations?: Array<{ id: string; text: string }>;
+  instance_summary: {
+    workflow_instance_id: string | null;
+    document_id: string | null;
+    template_id: string;
+    template_name?: string;
+    status: string;
+    current_step: number | null;
+    standardized_state?: string;
+    revision_count?: number;
+    resubmitted_at?: string | null;
+    max_step?: number;
+  };
 }
 
 export interface WorkflowInstanceStepRow {
@@ -99,49 +92,35 @@ export interface WorkflowInstanceStepRow {
   step_number: number | null;
   status: string;
   assignee_role: string | null;
-  assignee_user_id: string | null;
   sla_due_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
+  metadata?: Record<string, unknown>;
 }
 
-export interface WorkflowActionRecord {
+/** Row from GET /workflows/templates */
+export interface WorkflowTemplateSummary {
   id: string;
-  workflow_instance_id: string;
-  instance_step_id: string | null;
-  actor_id: string | null;
+  name: string;
+  steps: Array<{
+    step_number?: number;
+    step?: number;
+    name: string;
+    assignee_role: string;
+    action_type: string;
+  }>;
+  created_at?: string;
+}
+
+/** POST /workflows/templates — same shape as stored JSON steps */
+export interface WorkflowStepDefinition {
+  step_number: number;
+  name: string;
+  assignee_role: string;
   action_type: string;
-  comment: string | null;
-  client_ip: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: string;
 }
 
-export interface StartWorkflowRequest {
-  template_id: string;
-  document_id: string;
-}
-
-export interface AdvanceWorkflowResponse {
-  workflow: WorkflowInstance;
-  warnings?: { agent: string; error: string }[];
-}
-
-export interface WorkflowTransitionRequest {
-  action:
-    | 'approve'
-    | 'reject'
-    | 'return'
-    | 'delegate'
-    | 'escalate'
-    | 'cancel'
-    | 'pause'
-    | 'resume'
-    | 'comment';
-  comment?: string;
-  delegate_to_user_id?: string;
-  payload?: Record<string, unknown>;
+export interface CreateWorkflowTemplatePayload {
+  name: string;
+  steps: WorkflowStepDefinition[];
 }

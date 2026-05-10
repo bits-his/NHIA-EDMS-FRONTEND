@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  FileText, GitBranch, CheckSquare, Shield, Plus, Search,
+  FileText, Layers, CheckSquare, Shield, Plus, Search,
   ArrowRight, Bell, TrendingUp, Clock, AlertTriangle, Activity,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -154,7 +154,7 @@ function AdminDashboard() {
     <div className="space-y-6">
       <PageHeader
         title="Admin Dashboard"
-        description="System-wide overview — documents, workflows, tasks, and audit activity"
+        description="System-wide overview — documents, tasks, and audit activity"
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
@@ -351,7 +351,7 @@ function AdminDashboard() {
             <CardContent className="space-y-1">
               <QuickAction icon={Plus}      label="Create Document"  path="/documents/new" navigate={navigate} />
               <QuickAction icon={FileText}  label="All Documents"    path="/documents"     navigate={navigate} />
-              <QuickAction icon={GitBranch} label="Workflows"        path="/workflows"     navigate={navigate} />
+              <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
               <QuickAction icon={Shield}    label="Audit Log"        path="/audit"         navigate={navigate} />
               <QuickAction icon={Search}    label="Search & OCR"     path="/search"        navigate={navigate} />
             </CardContent>
@@ -501,7 +501,7 @@ function UserDashboard() {
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>
-            {canCreateDocument(user?.roles ?? []) && (
+            {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
               <Button size="sm" onClick={() => navigate('/documents/new')}>
                 <Plus className="h-4 w-4" /> New Document
               </Button>
@@ -557,7 +557,7 @@ function UserDashboard() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">Step {task.step_number} — Review Task</p>
-                          <p className="text-xs text-muted-foreground">Workflow task</p>
+                          <p className="text-xs text-muted-foreground">Review task</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -576,9 +576,9 @@ function UserDashboard() {
           <Card>
             <CardHeader><CardTitle className="text-base">Quick Actions</CardTitle></CardHeader>
             <CardContent className="space-y-1">
-              {canCreateDocument(user?.roles ?? []) && <QuickAction icon={Plus} label="Create Document" path="/documents/new" navigate={navigate} />}
+              {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && <QuickAction icon={Plus} label="Create Document" path="/documents/new" navigate={navigate} />}
               <QuickAction icon={FileText}  label="Browse Documents" path="/documents"  navigate={navigate} />
-              <QuickAction icon={GitBranch} label="View Workflows"   path="/workflows"  navigate={navigate} />
+              <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
               <QuickAction icon={Search}    label="Search & OCR"     path="/search"     navigate={navigate} />
             </CardContent>
           </Card>

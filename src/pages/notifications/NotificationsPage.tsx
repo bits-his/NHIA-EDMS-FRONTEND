@@ -58,7 +58,7 @@ export default function NotificationsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Notifications"
-        description="Stay up to date with document and workflow activity"
+        description="Stay up to date with document activity"
         actions={
           unreadCount > 0 ? (
             <Button variant="outline" size="sm" onClick={handleMarkAllRead}>
@@ -99,7 +99,7 @@ export default function NotificationsPage() {
         <EmptyState
           icon={Bell}
           title={filter === 'unread' ? 'All caught up' : 'No notifications'}
-          description={filter === 'unread' ? 'You have no unread notifications' : 'Notifications will appear here when documents and workflows are updated'}
+          description={filter === 'unread' ? 'You have no unread notifications' : 'Notifications will appear here when documents are updated'}
         />
       ) : (
         <div className="space-y-2">

@@ -2,8 +2,6 @@
 export type DocumentTemplateStatus = 'draft' | 'published' | 'archived';
 
 export interface DocumentTemplateMetadata {
-  /** Default workflow template when creating documents from this catalogue template */
-  workflow_template_id?: string;
   template_code?: string;
   version_label?: string;
   description?: string;

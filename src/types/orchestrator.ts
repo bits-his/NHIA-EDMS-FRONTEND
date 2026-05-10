@@ -1,5 +1,4 @@
 import type { Document } from './document';
-import type { WorkflowInstance } from './workflow';
 
 export interface DocumentSubmitRequest {
   title: string;
@@ -9,16 +8,6 @@ export interface DocumentSubmitRequest {
 
 export interface DocumentSubmitResponse {
   document: Document;
-  workflow: WorkflowInstance;
-}
-
-export interface WorkflowStartRequest {
-  template_id: string;
-  document_id: string;
-}
-
-export interface WorkflowStartResponse {
-  workflow: WorkflowInstance;
 }
 
 export interface OrchestratorStatusResponse {
@@ -30,11 +19,5 @@ export interface OrchestratorStatusResponse {
     owner_id: string;
     updated_at: string;
   };
-  workflow: {
-    id: string;
-    status: string;
-    current_step: number;
-    template_id: string;
-    updated_at: string;
-  } | null;
+  workflow: null;
 }

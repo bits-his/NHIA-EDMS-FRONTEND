@@ -150,7 +150,7 @@ export default function AuditPage() {
             /* ── Entity mode ── */
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Find all audit events for a specific document, workflow, or task by pasting its ID.
+                Find all audit events for a specific document or task by pasting its ID.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -159,7 +159,6 @@ export default function AuditPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="document">Document</SelectItem>
-                      <SelectItem value="workflow">Workflow</SelectItem>
                       <SelectItem value="task">Task</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                     </SelectContent>
@@ -198,7 +197,7 @@ export default function AuditPage() {
           </div>
           <p className="text-sm font-medium text-foreground">Query the audit log</p>
           <p className="text-xs text-muted-foreground mt-1.5 max-w-xs leading-relaxed">
-            Select a user to see their activity, or search by entity to trace a specific document or workflow
+            Select a user to see their activity, or search by entity to trace a specific document or task
           </p>
         </div>
       ) : error ? (

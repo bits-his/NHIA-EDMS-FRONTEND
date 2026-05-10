@@ -7,7 +7,6 @@ import {
   Copy,
   Eye,
   FileStack,
-  GitBranch,
   Layers,
   Loader2,
   MoreHorizontal,
@@ -54,18 +53,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TemplatePreviewPanel } from '@/components/template-builder/TemplatePreviewPanel';
 import { documentsApi } from '@/api/documents';
-import { workflowsApi } from '@/api/workflows';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDateTime } from '@/utils/formatters';
 import { cn } from '@/utils/cn';
 import { TEMPLATE_DOCUMENT_GROUPS, SCOPE_LEVELS } from '@/components/template-builder/constants';
 import { templateRowToFormFields } from '@/utils/documentTemplatePayload';
-import type {
-  DocumentTemplate,
-  DocumentTemplateMetadata,
-  DocumentTemplateStatus,
-} from '@/types/documentTemplate';
+import type { DocumentTemplate, DocumentTemplateStatus } from '@/types/documentTemplate';
 import { toast } from 'sonner';
 
 function categoryLabel(value: string): string {
@@ -106,19 +100,12 @@ export default function TemplateListPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const [previewTemplate, setPreviewTemplate] = useState<DocumentTemplate | null>(null);
-  const [assignFor, setAssignFor] = useState<DocumentTemplate | null>(null);
-  const [workflowPickId, setWorkflowPickId] = useState('');
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: templates, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: [QUERY_KEYS.documentTemplates],
     queryFn: () => documentsApi.listTemplates(),
-  });
-
-  const { data: workflowTemplates } = useQuery({
-    queryKey: [QUERY_KEYS.workflowTemplates],
-    queryFn: () => workflowsApi.getTemplates(),
   });
 
   const archiveMutation = useMutation({
@@ -144,30 +131,6 @@ export default function TemplateListPage() {
 
   const deleteTargetName =
     templates?.find((x) => x.id === deleteConfirmId)?.name?.trim() || 'this template';
-
-  const assignWorkflowMutation = useMutation({
-    mutationFn: ({
-      id,
-      metadata,
-    }: {
-      id: string;
-      metadata: DocumentTemplateMetadata | null;
-    }) => documentsApi.updateTemplate(id, { metadata: metadata ?? {} }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.documentTemplates] });
-      toast.success('Workflow assignment saved.');
-      setAssignFor(null);
-    },
-    onError: (err) => toast.error(getErrorMessage(err)),
-  });
-
-  useEffect(() => {
-    if (assignFor) {
-      setWorkflowPickId(assignFor.metadata?.workflow_template_id ?? '');
-    } else {
-      setWorkflowPickId('');
-    }
-  }, [assignFor]);
 
   const filtered = useMemo(() => {
     if (!templates?.length) return [];
@@ -202,12 +165,6 @@ export default function TemplateListPage() {
   const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = filtered.length === 0 ? 0 : Math.min(safePage * pageSize, filtered.length);
 
-  const workflowNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    workflowTemplates?.forEach((w) => m.set(w.id, w.name));
-    return m;
-  }, [workflowTemplates]);
-
   async function handleDuplicate(t: DocumentTemplate) {
     try {
       const full = await documentsApi.getTemplate(t.id);
@@ -226,18 +183,6 @@ export default function TemplateListPage() {
     }
   }
 
-  function handleSaveWorkflowAssignment() {
-    if (!assignFor) return;
-    const nextMeta: DocumentTemplateMetadata = {
-      ...(assignFor.metadata ?? {}),
-      ...(workflowPickId ? { workflow_template_id: workflowPickId } : {}),
-    };
-    if (!workflowPickId) {
-      delete nextMeta.workflow_template_id;
-    }
-    assignWorkflowMutation.mutate({ id: assignFor.id, metadata: nextMeta });
-  }
-
   return (
     <div className="space-y-6">
       <nav className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -250,7 +195,7 @@ export default function TemplateListPage() {
 
       <PageHeader
         title="Template catalogue"
-        description="Browse, filter, and manage document templates. Assign a default workflow for submissions created from each template."
+        description="Browse, filter, and manage document templates for memos and correspondence."
         actions={
           <div className="flex flex-wrap gap-2 justify-end">
             <Button
@@ -348,7 +293,6 @@ export default function TemplateListPage() {
               <thead>
                 <tr className="border-b border-border bg-muted/40">
                   <th className="text-left font-semibold px-4 py-3">Template</th>
-                  <th className="text-left font-semibold px-4 py-3 w-[160px]">Workflow</th>
                   <th className="text-left font-semibold px-4 py-3 w-[160px]">Document type</th>
                   <th className="text-left font-semibold px-4 py-3 w-[120px]">Department</th>
                   <th className="text-left font-semibold px-4 py-3 w-[100px]">Status</th>
@@ -361,14 +305,8 @@ export default function TemplateListPage() {
                   <TemplateTableRow
                     key={t.id}
                     t={t}
-                    workflowLabel={
-                      t.metadata?.workflow_template_id
-                        ? workflowNameById.get(t.metadata.workflow_template_id) ?? '—'
-                        : '—'
-                    }
                     onPreview={() => setPreviewTemplate(t)}
                     onDuplicate={() => handleDuplicate(t)}
-                    onAssignWorkflow={() => setAssignFor(t)}
                     onArchive={() => setArchiveConfirmId(t.id)}
                     onDelete={() => setDeleteConfirmId(t.id)}
                     archiving={archiveMutation.isPending && archiveMutation.variables === t.id}
@@ -384,14 +322,8 @@ export default function TemplateListPage() {
               <MobileTemplateCard
                 key={t.id}
                 t={t}
-                workflowLabel={
-                  t.metadata?.workflow_template_id
-                    ? workflowNameById.get(t.metadata.workflow_template_id) ?? '—'
-                    : '—'
-                }
                 onPreview={() => setPreviewTemplate(t)}
                 onDuplicate={() => handleDuplicate(t)}
-                onAssignWorkflow={() => setAssignFor(t)}
                 onArchive={() => setArchiveConfirmId(t.id)}
                 onDelete={() => setDeleteConfirmId(t.id)}
                 archiving={archiveMutation.isPending && archiveMutation.variables === t.id}
@@ -519,51 +451,6 @@ export default function TemplateListPage() {
         </DialogPortal>
       </DialogRoot>
 
-      {/* Assign workflow */}
-      <DialogRoot open={!!assignFor} onOpenChange={(open) => !open && setAssignFor(null)}>
-        <DialogPortal>
-          <DialogOverlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-          <DialogContent className="fixed left-[50%] top-[50%] z-50 w-[min(100vw-2rem,28rem)] max-w-[calc(100vw-2rem)] translate-x-[-50%] translate-y-[-50%] rounded-xl border border-border bg-background p-6 shadow-xl focus:outline-none">
-            <DialogTitle className="text-lg font-semibold">Assign workflow template</DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground mt-1 mb-4">
-              Used as the default workflow when staff submit documents created from this catalogue
-              template (e.g. “Submit immediately” on new document).
-            </DialogDescription>
-            <div className="space-y-2">
-              <Label htmlFor="wf-pick">Workflow template</Label>
-              <Select value={workflowPickId || '__none__'} onValueChange={(v) => setWorkflowPickId(v === '__none__' ? '' : v)}>
-                <SelectTrigger id="wf-pick">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {workflowTemplates?.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name} ({w.steps.length} step{w.steps.length !== 1 ? 's' : ''})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <Button variant="outline" type="button" onClick={() => setAssignFor(null)}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSaveWorkflowAssignment}
-                disabled={assignWorkflowMutation.isPending}
-              >
-                {assignWorkflowMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                ) : null}
-                Save
-              </Button>
-            </div>
-          </DialogContent>
-        </DialogPortal>
-      </DialogRoot>
-
       <ConfirmDialog
         open={!!archiveConfirmId}
         onOpenChange={(open) => !open && setArchiveConfirmId(null)}
@@ -592,7 +479,6 @@ export default function TemplateListPage() {
 function TemplateActionsDropdown({
   onPreview,
   onDuplicate,
-  onAssignWorkflow,
   onArchive,
   onDelete,
   onEditTo,
@@ -602,7 +488,6 @@ function TemplateActionsDropdown({
 }: {
   onPreview: () => void;
   onDuplicate: () => void;
-  onAssignWorkflow: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onEditTo: string;
@@ -625,10 +510,6 @@ function TemplateActionsDropdown({
         <DropdownMenuItem onClick={onDuplicate}>
           <Copy className="h-4 w-4 mr-2" />
           Duplicate
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onAssignWorkflow}>
-          <GitBranch className="h-4 w-4 mr-2" />
-          Assign workflow
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onArchive} disabled={disabledArchive || archiving}>
@@ -662,20 +543,16 @@ function TemplateActionsDropdown({
 
 function TemplateTableRow({
   t,
-  workflowLabel,
   onPreview,
   onDuplicate,
-  onAssignWorkflow,
   onArchive,
   onDelete,
   archiving,
   deleting,
 }: {
   t: DocumentTemplate;
-  workflowLabel: string;
   onPreview: () => void;
   onDuplicate: () => void;
-  onAssignWorkflow: () => void;
   onArchive: () => void;
   onDelete: () => void;
   archiving: boolean;
@@ -691,7 +568,6 @@ function TemplateTableRow({
           <div className="text-[11px] font-mono text-muted-foreground mt-0.5">{t.metadata.template_code}</div>
         ) : null}
       </td>
-      <td className="px-4 py-3 align-top text-muted-foreground text-xs">{workflowLabel}</td>
       <td className="px-4 py-3 align-top text-muted-foreground">{categoryLabel(t.category)}</td>
       <td className="px-4 py-3 align-top text-muted-foreground">{t.department || '—'}</td>
       <td className="px-4 py-3 align-top">
@@ -704,7 +580,6 @@ function TemplateTableRow({
         <TemplateActionsDropdown
           onPreview={onPreview}
           onDuplicate={onDuplicate}
-          onAssignWorkflow={onAssignWorkflow}
           onArchive={onArchive}
           onDelete={onDelete}
           onEditTo={`/template-management/edit/${t.id}`}
@@ -719,20 +594,16 @@ function TemplateTableRow({
 
 function MobileTemplateCard({
   t,
-  workflowLabel,
   onPreview,
   onDuplicate,
-  onAssignWorkflow,
   onArchive,
   onDelete,
   archiving,
   deleting,
 }: {
   t: DocumentTemplate;
-  workflowLabel: string;
   onPreview: () => void;
   onDuplicate: () => void;
-  onAssignWorkflow: () => void;
   onArchive: () => void;
   onDelete: () => void;
   archiving: boolean;
@@ -748,7 +619,6 @@ function MobileTemplateCard({
         <TemplateActionsDropdown
           onPreview={onPreview}
           onDuplicate={onDuplicate}
-          onAssignWorkflow={onAssignWorkflow}
           onArchive={onArchive}
           onDelete={onDelete}
           onEditTo={`/template-management/edit/${t.id}`}
@@ -758,9 +628,6 @@ function MobileTemplateCard({
         />
       </div>
       <div className="text-xs text-muted-foreground space-y-1">
-        <p>
-          <span className="text-muted-foreground/80">Workflow:</span> {workflowLabel}
-        </p>
         <p>
           <span className="text-muted-foreground/80">Department:</span> {t.department || '—'}
         </p>

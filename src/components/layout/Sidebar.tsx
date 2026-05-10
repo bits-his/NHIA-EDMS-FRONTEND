@@ -2,8 +2,8 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   FileText,
-  GitBranch,
   CheckSquare,
+  GitBranch,
   Shield,
   Bell,
   Search,
@@ -22,8 +22,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/documents', icon: FileText, label: 'Documents' },
-  { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
+  { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/audit', icon: Shield, label: 'Audit Log' },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true },
   { to: '/search', icon: Search, label: 'Search & OCR' },
@@ -85,7 +85,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               ? path === '/documents' ||
                 path.startsWith('/documents/new') ||
                 /^\/documents\/[0-9a-f-]{36}/i.test(path)
-              : path.startsWith(to);
+              : to === '/workflows'
+                ? path === '/workflows' || path.startsWith('/workflows/')
+                : path.startsWith(to);
           const showBadge = badge && unreadCount > 0;
 
           const linkContent = (

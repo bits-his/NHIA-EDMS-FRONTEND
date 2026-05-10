@@ -8,10 +8,10 @@ import {
   Info,
   Plus,
   Users,
-  PenTool,
   Search,
   LayoutGrid,
   List,
+  Eye,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,21 +23,26 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { CardSkeleton } from '@/components/shared/Skeleton';
 import { WorkflowStepper } from '@/components/workflows/WorkflowStepper';
-import { workflowsApi } from '@/api/workflows';
+import { CreateCustomWorkflowDialog } from '@/components/workflows/CreateCustomWorkflowDialog';
+import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDate } from '@/utils/formatters';
 
 type ViewMode = 'grid' | 'list';
 
+const CUSTOM_WORKFLOW_CREATOR_ROLES = new Set(['admin', 'director', 'submitter']);
+
 export default function WorkflowsPage() {
   const navigate = useNavigate();
-  const isAdmin = useAuthStore((s) => s.user?.roles.includes('admin')) ?? false;
+  const roles = useAuthStore((s) => s.user?.roles) ?? [];
+  const canCreateCustomWorkflow = roles.some((r) => CUSTOM_WORKFLOW_CREATOR_ROLES.has(r));
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>('grid');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const { data: templates, isLoading, error, refetch } = useQuery({
     queryKey: [QUERY_KEYS.workflowTemplates],
-    queryFn: () => workflowsApi.getTemplates(),
+    queryFn: () => workflowApi.getTemplates(),
   });
 
   const filtered = useMemo(() => {
@@ -53,16 +58,38 @@ export default function WorkflowsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Workflow Templates"
-        description="Approval process templates — select one when submitting a document"
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <PageHeader
+          title="Workflow Templates"
+          description="Approval process templates — select one when submitting a document, or create your own linear route."
+        />
+        {canCreateCustomWorkflow ? (
+          <Button type="button" className="shrink-0 gap-2 w-fit" onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Custom workflow
+          </Button>
+        ) : null}
+      </div>
+
+      <CreateCustomWorkflowDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onCreated={(templateId) => navigate(`/documents/new?template_id=${templateId}`)}
       />
 
       <Alert variant="info">
         <Info className="h-4 w-4" />
         <AlertDescription>
-          <strong>How it works:</strong> You don't create a workflow directly. When submitting a document, pick a
-          template and a workflow instance starts automatically. Each step assigns a task to the relevant role.
+          <strong>How it works:</strong> Use a catalogue template below, or{' '}
+          {canCreateCustomWorkflow ? (
+            <>
+              use <strong>Custom workflow</strong> to define steps without picking an existing template name — then start
+              a document with that new route.
+            </>
+          ) : (
+            <>ask an administrator to grant submitter access if you need to define ad-hoc routes.</>
+          )}{' '}
+          Each step assigns tasks to the chosen NHIA role.
         </AlertDescription>
       </Alert>
 
@@ -115,7 +142,21 @@ export default function WorkflowsPage() {
           ))}
         </div>
       ) : !templates?.length ? (
-        <EmptyState icon={GitBranch} title="No workflow templates" description="No workflow templates have been configured yet" />
+        <div className="space-y-4">
+          <EmptyState
+            icon={GitBranch}
+            title="No workflow templates"
+            description="No workflow templates have been configured yet. Create a custom workflow to define your own approval steps."
+          />
+          {canCreateCustomWorkflow ? (
+            <div className="flex justify-center">
+              <Button type="button" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-4 w-4" />
+                Create custom workflow
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Search}
@@ -140,7 +181,9 @@ export default function WorkflowsPage() {
                       </div>
                       <div>
                         <CardTitle className="text-base">{template.name}</CardTitle>
-                        <p className="text-xs text-muted-foreground mt-0.5">Created {formatDate(template.created_at)}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Created {template.created_at ? formatDate(template.created_at) : '—'}
+                        </p>
                       </div>
                     </div>
                     <span className="inline-flex items-center gap-1 text-xs font-medium bg-primary/8 text-primary px-2.5 py-1 rounded-full shrink-0">
@@ -190,15 +233,13 @@ export default function WorkflowsPage() {
                       {template.id}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {isAdmin ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate(`/template-management/workflow-designer/${template.id}`)}
-                        >
-                          <PenTool className="h-3.5 w-3.5" /> Design
-                        </Button>
-                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/workflows/templates/${template.id}/design`)}
+                      >
+                        <Eye className="h-3.5 w-3.5" /> View flow
+                      </Button>
                       <Button
                         size="sm"
                         variant="soft-primary"
@@ -243,18 +284,18 @@ export default function WorkflowsPage() {
                   </div>
                   <div className="flex items-center justify-between sm:justify-start gap-2">
                     <span className="sm:hidden text-xs text-muted-foreground">Created</span>
-                    <span className="text-xs text-muted-foreground">{formatDate(template.created_at)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {template.created_at ? formatDate(template.created_at) : '—'}
+                    </span>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    {isAdmin ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => navigate(`/template-management/workflow-designer/${template.id}`)}
-                      >
-                        <PenTool className="h-3.5 w-3.5" /> Design
-                      </Button>
-                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigate(`/workflows/templates/${template.id}/design`)}
+                    >
+                      <Eye className="h-3.5 w-3.5" /> View flow
+                    </Button>
                     <Button
                       size="sm"
                       variant="soft-primary"

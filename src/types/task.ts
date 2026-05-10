@@ -3,6 +3,8 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 export interface Task {
   id: string;
   workflow_instance_id: string;
+  /** Joined from workflow_instances when listing/fetching tasks */
+  document_id?: string | null;
   step_number: number;
   assignee_id: string;
   status: TaskStatus;

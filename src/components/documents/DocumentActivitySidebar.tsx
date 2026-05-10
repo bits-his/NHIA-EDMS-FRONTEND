@@ -61,7 +61,7 @@ export function DocumentActivitySidebar({
               <Skeleton className="h-10 w-full" />
             </div>
           ) : !actions?.length ? (
-            <p className="text-sm text-muted-foreground">No workflow actions yet.</p>
+            <p className="text-sm text-muted-foreground">No recorded actions yet.</p>
           ) : (
             <ScrollArea className="h-[min(280px,40vh)] pr-2">
               <ul className="space-y-3 text-sm">

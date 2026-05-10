@@ -1,6 +1,5 @@
 import type { DocumentStatus } from '@/types/document';
 import type { TaskStatus } from '@/types/task';
-import type { WorkflowStatus } from '@/types/workflow';
 
 export const DOCUMENT_STATUS_CONFIG: Record<
   DocumentStatus,
@@ -64,60 +63,10 @@ export const TASK_STATUS_CONFIG: Record<
   },
 };
 
-export const WORKFLOW_STATUS_CONFIG: Record<
-  WorkflowStatus,
-  { label: string; color: string; bg: string }
-> = {
-  active: {
-    label: 'Active',
-    color: 'text-blue-700 dark:text-blue-400',
-    bg: 'bg-blue-50 dark:bg-blue-900/30',
-  },
-  completed: {
-    label: 'Completed',
-    color: 'text-emerald-700 dark:text-emerald-400',
-    bg: 'bg-emerald-50 dark:bg-emerald-900/30',
-  },
-  rejected: {
-    label: 'Rejected',
-    color: 'text-red-700 dark:text-red-400',
-    bg: 'bg-red-50 dark:bg-red-900/30',
-  },
-  cancelled: {
-    label: 'Cancelled',
-    color: 'text-slate-700 dark:text-slate-400',
-    bg: 'bg-slate-100 dark:bg-slate-900/40',
-  },
-  returned_for_correction: {
-    label: 'Returned',
-    color: 'text-amber-800 dark:text-amber-400',
-    bg: 'bg-amber-50 dark:bg-amber-900/25',
-  },
-  in_progress: {
-    label: 'In progress',
-    color: 'text-blue-700 dark:text-blue-400',
-    bg: 'bg-blue-50 dark:bg-blue-900/30',
-  },
-  pending_approval: {
-    label: 'Pending approval',
-    color: 'text-amber-700 dark:text-amber-400',
-    bg: 'bg-amber-50 dark:bg-amber-900/30',
-  },
-  pending_review: {
-    label: 'Pending review',
-    color: 'text-amber-700 dark:text-amber-400',
-    bg: 'bg-amber-50 dark:bg-amber-900/30',
-  },
-};
-
 export const QUERY_KEYS = {
   documents: 'documents',
   document: (id: string) => ['document', id],
   documentVersions: (id: string) => ['document-versions', id],
-  workflows: 'workflows',
-  workflowTemplates: 'workflow-templates',
-  workflowTemplateVersions: (templateId: string) => ['workflow-template-versions', templateId],
-  workflow: (id: string) => ['workflow', id],
   tasks: (assigneeId: string) => ['tasks', assigneeId],
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
@@ -129,6 +78,16 @@ export const QUERY_KEYS = {
   documentAttachments: (id: string) => ['document-attachments', id],
   documentsSearch: (filters: object) => ['documents-search', filters],
   documentWorkflowActions: (id: string) => ['document-workflow-actions', id],
+  workflowInstanceByDocument: (documentId: string) => ['workflow-instance-by-document', documentId],
+  workflowBpmnView: (workflowInstanceId: string, documentStatus?: string) => [
+    'workflow-bpmn-view',
+    workflowInstanceId,
+    documentStatus ?? '',
+  ],
+  workflowSteps: (workflowInstanceId: string) => ['workflow-steps', workflowInstanceId],
+  workflowTemplates: 'workflow-templates',
+  workflowTemplate: (id: string) => ['workflow-template', id],
+  workflowTemplateBpmnPreview: (id: string) => ['workflow-template-bpmn-preview', id],
   documentTemplates: 'document-templates',
   documentTemplate: (id: string) => ['document-template', id],
   orgScopeReference: ['org-scope-reference'] as const,
@@ -153,6 +112,17 @@ export const SEEDED_USER_IDS = [
   'a0000001-0000-0000-0000-000000000001', // alice (admin)
   'b0000002-0000-0000-0000-000000000002', // bob (reviewer)
   'c0000003-0000-0000-0000-000000000003', // charlie (submitter)
+  // NHIA grade ladder (shared/seedData/nhiaSampleUsers.js + seeds/001_sample_data.js)
+  '20000001-0000-4000-8000-000000000001',
+  '20000001-0000-4000-8000-000000000002',
+  '20000001-0000-4000-8000-000000000003',
+  '20000001-0000-4000-8000-000000000004',
+  '20000001-0000-4000-8000-000000000005',
+  '20000001-0000-4000-8000-000000000006',
+  '20000001-0000-4000-8000-000000000007',
+  '20000001-0000-4000-8000-000000000008',
+  '20000001-0000-4000-8000-000000000009',
+  '20000001-0000-4000-8000-000000000010',
 ];
 
 /**

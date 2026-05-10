@@ -17,7 +17,7 @@ const PREVIEW_SAMPLES: Record<string, string> = {
   state_office: 'FCT',
   headquarters: 'Abuja HQ',
   unit: 'Records & Archives Unit',
-  workflow_status: 'Pending approval (Executive routing)',
+  workflow_status: 'Pending approval',
   directorate: 'Directorate of Corporate Services',
   classification: 'Official — Internal Use',
   'e-signature': `<div class="nhia-preview-sig mt-3 flex flex-col gap-1 border-t border-dashed border-slate-300 pt-3 dark:border-slate-600"><span class="font-serif text-lg italic text-slate-800 dark:text-slate-200">Ibrahim M.</span><span class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Electronically signed · preview sample</span></div>`,

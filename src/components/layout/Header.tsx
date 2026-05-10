@@ -21,7 +21,6 @@ import { resolveUsername } from '@/utils/users';
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:     'Dashboard',
   documents:     'Documents',
-  workflows:     'Workflows',
   tasks:         'My Tasks',
   audit:         'Audit Log',
   notifications: 'Notifications',

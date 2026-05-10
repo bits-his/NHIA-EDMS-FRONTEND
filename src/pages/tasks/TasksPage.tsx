@@ -7,7 +7,6 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { TaskStatusBadge } from '@/components/tasks/TaskStatusBadge';
 import { tasksApi } from '@/api/tasks';
-import { workflowsApi } from '@/api/workflows';
 import { documentsApi } from '@/api/documents';
 import { useAuthStore } from '@/stores/authStore';
 import { QUERY_KEYS } from '@/utils/constants';
@@ -46,7 +45,7 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="My Tasks" description="Tasks assigned to you across all workflows" />
+      <PageHeader title="My Tasks" description="Tasks assigned to you" />
 
       {/* Filter tabs */}
       <div className="flex items-center gap-1.5 flex-wrap p-1 bg-muted rounded-lg w-fit">
@@ -97,15 +96,10 @@ export default function TasksPage() {
 function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
   const overdue = isOverdue(task.due_date) && task.status !== 'completed' && task.status !== 'cancelled';
 
-  const { data: workflowInstance } = useQuery({
-    queryKey: QUERY_KEYS.workflow(task.workflow_instance_id),
-    queryFn: () => workflowsApi.getById(task.workflow_instance_id),
-  });
-
   const { data: document } = useQuery({
-    queryKey: QUERY_KEYS.document(workflowInstance?.document_id ?? ''),
-    queryFn: () => documentsApi.getById(workflowInstance!.document_id),
-    enabled: !!workflowInstance?.document_id,
+    queryKey: QUERY_KEYS.document(task.document_id ?? ''),
+    queryFn: () => documentsApi.getById(task.document_id!),
+    enabled: !!task.document_id,
   });
 
   return (

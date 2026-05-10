@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ArrowLeft, CheckSquare, Play, X, Check, Clock,
-  AlertCircle, FileText, GitBranch, ExternalLink,
+  AlertCircle, FileText, ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,7 +12,6 @@ import { Skeleton } from '@/components/shared/Skeleton';
 import { TaskStatusBadge } from '@/components/tasks/TaskStatusBadge';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { tasksApi } from '@/api/tasks';
-import { workflowsApi } from '@/api/workflows';
 import { documentsApi } from '@/api/documents';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
@@ -39,16 +38,10 @@ export default function TaskDetailPage() {
     enabled: !!id,
   });
 
-  const { data: workflowInstance } = useQuery({
-    queryKey: QUERY_KEYS.workflow(task?.workflow_instance_id ?? ''),
-    queryFn: () => workflowsApi.getById(task!.workflow_instance_id),
-    enabled: !!task?.workflow_instance_id,
-  });
-
   const { data: document } = useQuery({
-    queryKey: QUERY_KEYS.document(workflowInstance?.document_id ?? ''),
-    queryFn: () => documentsApi.getById(workflowInstance!.document_id),
-    enabled: !!workflowInstance?.document_id,
+    queryKey: QUERY_KEYS.document(task?.document_id ?? ''),
+    queryFn: () => documentsApi.getById(task!.document_id!),
+    enabled: !!task?.document_id,
   });
 
   const updateMutation = useMutation({
@@ -146,10 +139,14 @@ export default function TaskDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {!workflowInstance || !document ? (
+              {!task.document_id ? (
+                <p className="text-sm text-muted-foreground py-2">
+                  No document is linked to this task in the system.
+                </p>
+              ) : !document ? (
                 <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-2">
                   <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/20 border-t-primary animate-spin" />
-                  Resolving document…
+                  Loading document…
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -209,15 +206,6 @@ export default function TaskDetailPage() {
                   ) : (
                     <p className="text-sm text-muted-foreground">No due date</p>
                   )}
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Workflow</p>
-                  <button
-                    className="text-sm font-mono text-primary hover:underline flex items-center gap-1"
-                    onClick={() => navigate(`/workflows/${task.workflow_instance_id}`)}
-                  >
-                    <GitBranch className="h-3.5 w-3.5" /> {task.workflow_instance_id.slice(0, 8)}…
-                  </button>
                 </div>
               </div>
             </CardContent>

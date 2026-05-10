@@ -149,7 +149,7 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     },
     editForward: {
       title: 'Edit forward',
-      description: 'Record an edit-forward step (optional note). Status unchanged unless moving via workflow separately.',
+      description: 'Record an edit-forward step (optional note). Status unchanged unless updated separately.',
       placeholder: 'Optional note…',
     },
     approveForward: {
@@ -165,7 +165,7 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     },
   };
 
-  const anyWorkflowButton =
+  const anyPrimaryButton =
     actions.canSubmit ||
     actions.canFinalApprove ||
     actions.canReject ||
@@ -174,7 +174,7 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     actions.canApproveForward ||
     actions.canRequestInfo;
 
-  if (!anyWorkflowButton && !actions.canEdit) return null;
+  if (!anyPrimaryButton && !actions.canEdit) return null;
 
   return (
     <>

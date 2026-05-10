@@ -38,8 +38,11 @@ export function getDocumentActions(
   };
 }
 
-export function canCreateDocument(roles: string[]): boolean {
-  return roles.includes('admin') || roles.includes('submitter');
+export function canCreateDocument(roles: string[], permissions: string[] = []): boolean {
+  if (roles.includes('admin') || roles.includes('submitter')) return true;
+  if (permissions.includes('create_document')) return true;
+  // Backward compatibility for any legacy permission payloads.
+  return permissions.includes('write');
 }
 
 export function canViewAuditLogs(_roles: string[]): boolean {
@@ -48,10 +51,6 @@ export function canViewAuditLogs(_roles: string[]): boolean {
 
 export function canIndexSearch(roles: string[]): boolean {
   return roles.includes('admin');
-}
-
-export function canAdvanceWorkflow(roles: string[]): boolean {
-  return roles.includes('admin') || roles.includes('reviewer');
 }
 
 /** Enterprise template builder — administrators & records / submission roles. */

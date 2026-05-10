@@ -11,10 +11,10 @@ const DocumentsPage = lazy(() => import('@/pages/documents/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('@/pages/documents/DocumentDetailPage'));
 const CreateDocumentPage = lazy(() => import('@/pages/documents/CreateDocumentPage'));
 const EditDocumentPage = lazy(() => import('@/pages/documents/EditDocumentPage'));
-const WorkflowsPage = lazy(() => import('@/pages/workflows/WorkflowsPage'));
-const WorkflowDetailPage = lazy(() => import('@/pages/workflows/WorkflowDetailPage'));
 const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'));
 const TaskDetailPage = lazy(() => import('@/pages/tasks/TaskDetailPage'));
+const WorkflowsPage = lazy(() => import('@/pages/workflows/WorkflowsPage'));
+const WorkflowTemplateDesignPage = lazy(() => import('@/pages/workflows/WorkflowTemplateDesignPage'));
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'));
 const NotificationsPage = lazy(() => import('@/pages/notifications/NotificationsPage'));
 const SearchPage = lazy(() => import('@/pages/search/SearchPage'));
@@ -22,8 +22,6 @@ const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
 const TemplateListPage = lazy(() => import('@/pages/template-management/TemplateListPage'));
 const CreateDocumentTemplatePage = lazy(() => import('@/pages/template-management/CreateDocumentTemplatePage'));
-const WorkflowDesignerPage = lazy(() => import('@/pages/template-management/WorkflowDesignerPage'));
-
 function Wrap({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
 }
@@ -89,22 +87,6 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: 'workflows',
-        element: (
-          <Wrap>
-            <WorkflowsPage />
-          </Wrap>
-        ),
-      },
-      {
-        path: 'workflows/:id',
-        element: (
-          <Wrap>
-            <WorkflowDetailPage />
-          </Wrap>
-        ),
-      },
-      {
         path: 'tasks',
         element: (
           <Wrap>
@@ -117,6 +99,22 @@ export const router = createBrowserRouter([
         element: (
           <Wrap>
             <TaskDetailPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'workflows',
+        element: (
+          <Wrap>
+            <WorkflowsPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'workflows/templates/:templateId/design',
+        element: (
+          <Wrap>
+            <WorkflowTemplateDesignPage />
           </Wrap>
         ),
       },
@@ -156,7 +154,9 @@ export const router = createBrowserRouter([
         path: 'admin/users',
         element: (
           <Wrap>
-            <UsersPage />
+            <RoleGuard roles={['admin']} fallback={<Navigate to="/dashboard" replace />}>
+              <UsersPage />
+            </RoleGuard>
           </Wrap>
         ),
       },
@@ -186,16 +186,6 @@ export const router = createBrowserRouter([
           <Wrap>
             <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
               <CreateDocumentTemplatePage />
-            </RoleGuard>
-          </Wrap>
-        ),
-      },
-      {
-        path: 'template-management/workflow-designer/:templateId',
-        element: (
-          <Wrap>
-            <RoleGuard roles={['admin']} fallback={<Navigate to="/workflows" replace />}>
-              <WorkflowDesignerPage />
             </RoleGuard>
           </Wrap>
         ),

@@ -77,6 +77,7 @@ export interface CreateDocumentRequest {
   category: DocumentCategory;
   department: string;
   urgency?: DocumentUrgency;
+  template_id?: string;
   /** Omit for auto-generated ref; must be unique when set. */
   ref_number?: string;
   recipients?: CreateRecipientInput[];

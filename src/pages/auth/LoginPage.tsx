@@ -39,11 +39,14 @@ export default function LoginPage() {
   const mutation = useMutation({
     mutationFn: async (data: LoginForm) => {
       const { token } = await authApi.login(data);
-      const user = await authApi.validate(token);
-      const rolesData = await authApi.getUserRoles(user.user_id);
-      const permissions = rolesData.roles.flatMap((r) => r.permissions);
+      const session = await authApi.validate(token);
+      const rolesData = await authApi.getUserRoles(session.user_id, token);
+      const permissions =
+        session.permissions?.length ?
+          session.permissions
+        : rolesData.roles.flatMap((r) => r.permissions);
       // Store the username the user typed — the backend doesn't return it in the JWT
-      return { token, user: { ...user, username: data.username, permissions } };
+      return { token, user: { ...session, username: data.username, permissions } };
     },
     onSuccess: ({ token, user }) => {
       setAuth(token, user);
@@ -93,7 +96,7 @@ export default function LoginPage() {
         <div className="relative z-10 grid grid-cols-3 gap-3">
           {[
             { label: 'Documents', value: 'Managed' },
-            { label: 'Workflows', value: 'Automated' },
+            { label: 'Tasks', value: 'Tracked' },
             { label: 'Audit Trail', value: 'Immutable' },
           ].map((s) => (
             <div key={s.label} className="rounded-xl bg-white/8 backdrop-blur-sm border border-white/10 p-4">

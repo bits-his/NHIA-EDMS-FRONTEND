@@ -1,24 +1,10 @@
 import { orchestratorClient } from './client';
-import type {
-  DocumentSubmitRequest,
-  DocumentSubmitResponse,
-  WorkflowStartRequest,
-  WorkflowStartResponse,
-  OrchestratorStatusResponse,
-} from '@/types/orchestrator';
+import type { DocumentSubmitRequest, DocumentSubmitResponse, OrchestratorStatusResponse } from '@/types/orchestrator';
 
 export const orchestratorApi = {
   submitDocument: async (data: DocumentSubmitRequest): Promise<DocumentSubmitResponse> => {
     const res = await orchestratorClient.post<DocumentSubmitResponse>(
       '/orchestrate/document-submit',
-      data
-    );
-    return res.data;
-  },
-
-  startWorkflow: async (data: WorkflowStartRequest): Promise<WorkflowStartResponse> => {
-    const res = await orchestratorClient.post<WorkflowStartResponse>(
-      '/orchestrate/workflow-start',
       data
     );
     return res.data;

@@ -51,8 +51,8 @@ export default function DocumentsPage() {
 
   const { data: allDocuments, isLoading, error, refetch } = useQuery({
     queryKey: useServerSearch
-      ? QUERY_KEYS.documentsSearch(searchFilters)
-      : [QUERY_KEYS.allDocuments],
+      ? [...QUERY_KEYS.documentsSearch(searchFilters), user?.user_id ?? 'anon']
+      : [QUERY_KEYS.allDocuments, user?.user_id ?? 'anon'],
     queryFn: () =>
       useServerSearch ? documentsApi.search(searchFilters) : documentsApi.listAll(),
     staleTime: 30_000,
@@ -80,9 +80,9 @@ export default function DocumentsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Documents"
-        description="All documents in the system"
+        description="Documents visible to your role (and your own created documents)"
         actions={
-          canCreateDocument(user?.roles ?? []) ? (
+          canCreateDocument(user?.roles ?? [], user?.permissions ?? []) ? (
             <Button size="sm" onClick={() => navigate('/documents/new')}>
               <Plus className="h-4 w-4" /> New Document
             </Button>
@@ -202,7 +202,7 @@ export default function DocumentsPage() {
           icon={FileText}
           title={hasFilters ? 'No matching documents' : 'No documents yet'}
           description={hasFilters ? 'Try adjusting your search or filters' : 'Create your first document to get started'}
-          action={canCreateDocument(user?.roles ?? []) ? { label: 'Create Document', onClick: () => navigate('/documents/new') } : undefined}
+          action={canCreateDocument(user?.roles ?? [], user?.permissions ?? []) ? { label: 'Create Document', onClick: () => navigate('/documents/new') } : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -27,7 +27,7 @@ export function EnterprisePageBanner({ environment, className }: EnterprisePageB
               </span>
               <Badge className="bg-emerald-600/90 hover:bg-emerald-600 text-[10px] px-2 py-0 h-5 border-0">
                 <Shield className="h-3 w-3 mr-1" aria-hidden />
-                Secure workflow
+                Secure approvals
               </Badge>
               <Badge variant="outline" className="border-white/25 text-white/90 text-[10px] px-2 py-0 h-5 bg-white/5">
                 <Lock className="h-3 w-3 mr-1" aria-hidden />

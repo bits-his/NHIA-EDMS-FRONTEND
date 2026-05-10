@@ -37,7 +37,18 @@ export const useAuthStore = create<AuthState>()(
 
       hasPermission: (permission) => {
         const { user } = get();
-        return user?.permissions.includes(permission) ?? false;
+        const list = user?.permissions ?? [];
+        if (list.includes(permission)) return true;
+        const canonByLegacy: Record<string, string> = {
+          read: 'view_document',
+          write: 'edit_document',
+          delete: 'archive_document',
+          approve: 'approve_document',
+          reject: 'reject_document',
+        };
+        if (canonByLegacy[permission] && list.includes(canonByLegacy[permission])) return true;
+        const legacyKey = Object.entries(canonByLegacy).find(([, v]) => v === permission)?.[0];
+        return !!(legacyKey && list.includes(legacyKey));
       },
     }),
     {

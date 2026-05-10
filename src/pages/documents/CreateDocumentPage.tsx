@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -6,38 +6,32 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, Zap, Eye, Upload, Plus, Trash2, Scan } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Upload, Plus, Trash2, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import MemoEditor from '@/components/documents/MemoEditor';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { documentsApi } from '@/api/documents';
 import { searchApi } from '@/api/search';
-import { orchestratorApi } from '@/api/orchestrator';
-import { workflowsApi } from '@/api/workflows';
-import { tasksApi } from '@/api/tasks';
 import { authApi } from '@/api/auth';
 import { registerUsers } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
-import { QUERY_KEYS, SEEDED_USER_IDS } from '@/utils/constants';
-import type { WorkflowTemplate } from '@/types/workflow';
+import { QUERY_KEYS } from '@/utils/constants';
 import type { RecipientType } from '@/types/document';
 import { cn } from '@/utils/cn';
 
 const internalSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500, 'Max 500 characters'),
   content: z.string().optional(),
+  document_template_id: z.string().min(1, 'Document template is required'),
   department: z.string().min(1, 'Department is required'),
   urgency: z.enum(['normal', 'urgent', 'very_urgent']),
   /** Leave blank for NHIA/DEPT/YEAR/SEQ auto-generation */
   ref_number: z.string().max(120).optional(),
-  submit_immediately: z.boolean(),
-  workflow_template_id: z.string().optional(),
   recipients: z.array(
     z.object({
       user_id: z.union([z.string().uuid(), z.literal('')]),
@@ -52,8 +46,6 @@ const externalSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500),
   department: z.string().min(1, 'Department is required'),
   ref_number: z.string().max(120).optional(),
-  submit_immediately: z.boolean(),
-  workflow_template_id: z.string().optional(),
   recipients: z.array(
     z.object({
       user_id: z.union([z.string().uuid(), z.literal('')]),
@@ -64,38 +56,19 @@ const externalSchema = z.object({
 
 type ExternalForm = z.infer<typeof externalSchema>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getStep1Role(template: WorkflowTemplate): string | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const step1 = template.steps.find((s: any) => s.step_number === 1 || s.step === 1) as any;
-  return step1?.assignee_role ?? null;
-}
-
-async function resolveRoleToUserId(role: string): Promise<string | null> {
-  for (const userId of SEEDED_USER_IDS) {
-    try {
-      const data = await authApi.getUserRoles(userId);
-      if (data.roles.some((r) => r.name === role)) return userId;
-    } catch {
-      /* skip */
-    }
-  }
-  return null;
-}
-
 export default function CreateDocumentPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-  const preWorkflowTemplateId = searchParams.get('template_id') ?? undefined;
+  const preDocumentTemplateId = searchParams.get('document_template_id') ?? undefined;
 
   const [creationMode, setCreationMode] = useState<'internal' | 'external'>('internal');
   const [preview, setPreview] = useState(false);
   const [externalFile, setExternalFile] = useState<File | null>(null);
 
-  const { data: workflowTemplates } = useQuery({
-    queryKey: [QUERY_KEYS.workflowTemplates],
-    queryFn: () => workflowsApi.getTemplates(),
+  const { data: documentTemplates } = useQuery({
+    queryKey: [QUERY_KEYS.documentTemplates],
+    queryFn: () => documentsApi.listTemplates(),
   });
 
   const { data: users } = useQuery({
@@ -111,8 +84,7 @@ export default function CreateDocumentPage() {
     resolver: zodResolver(internalSchema),
     defaultValues: {
       urgency: 'normal',
-      submit_immediately: !!preWorkflowTemplateId,
-      workflow_template_id: preWorkflowTemplateId,
+      document_template_id: preDocumentTemplateId,
       recipients: [] as InternalForm['recipients'],
     },
   });
@@ -125,7 +97,6 @@ export default function CreateDocumentPage() {
   const externalForm = useForm<ExternalForm>({
     resolver: zodResolver(externalSchema),
     defaultValues: {
-      submit_immediately: false,
       recipients: [],
     },
   });
@@ -137,8 +108,7 @@ export default function CreateDocumentPage() {
 
   const watchTitle = internalForm.watch('title');
   const watchContent = internalForm.watch('content');
-  const submitImmediately = internalForm.watch('submit_immediately');
-  const workflowTemplateId = internalForm.watch('workflow_template_id');
+  const documentTemplateId = internalForm.watch('document_template_id');
 
   const [ocrOpen, setOcrOpen] = useState(false);
 
@@ -158,8 +128,22 @@ export default function CreateDocumentPage() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  const selectedWorkflowTemplate = workflowTemplates?.find((t) => t.id === workflowTemplateId);
-  const step1Role = selectedWorkflowTemplate ? getStep1Role(selectedWorkflowTemplate) : null;
+  /** Apply catalogue template fields only when the selected template id changes (not on list refetch). */
+  const lastAppliedDocumentTemplateId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const id = documentTemplateId?.trim();
+    if (!id || !documentTemplates?.length) return;
+    const tpl = documentTemplates.find((t) => t.id === id);
+    if (!tpl) return;
+
+    if (lastAppliedDocumentTemplateId.current === id) return;
+    lastAppliedDocumentTemplateId.current = id;
+
+    internalForm.setValue('title', tpl.name);
+    internalForm.setValue('content', tpl.body_template ?? '');
+    internalForm.setValue('department', tpl.department ?? '');
+  }, [documentTemplateId, documentTemplates]); // eslint-disable-line react-hooks/exhaustive-deps -- internalForm.setValue is stable
 
   const onDrop = (accepted: File[]) => {
     if (accepted[0]) {
@@ -196,53 +180,21 @@ export default function CreateDocumentPage() {
         content: data.content,
         category: 'internal_memo',
         department: data.department.trim(),
+        template_id: data.document_template_id.trim(),
         urgency: data.urgency,
         ref_number: data.ref_number?.trim() || undefined,
         recipients,
       });
 
-      if (data.submit_immediately && data.workflow_template_id) {
-        const wf = await orchestratorApi.startWorkflow({
-          template_id: data.workflow_template_id,
-          document_id: result.document.id,
-        });
-        const template = workflowTemplates?.find((t) => t.id === data.workflow_template_id);
-        if (template) {
-          const role = getStep1Role(template);
-          if (role) {
-            try {
-              const assigneeId = await resolveRoleToUserId(role);
-              if (assigneeId) {
-                await tasksApi.create({
-                  workflow_instance_id: wf.workflow.id,
-                  step_number: 1,
-                  assignee_id: assigneeId,
-                });
-              }
-            } catch (e) {
-              console.warn('[create-doc] Task creation failed:', e);
-            }
-          }
-        }
-      }
-
       return result.document.id;
     },
     onSuccess: (docId) => {
-      toast.success(
-        submitImmediately && workflowTemplateId
-          ? 'Document created and workflow started'
-          : 'Document created successfully'
-      );
+      toast.success('Document created successfully');
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
-      SEEDED_USER_IDS.forEach((uid) => queryClient.invalidateQueries({ queryKey: QUERY_KEYS.tasks(uid) }));
       navigate(`/documents/${docId}`);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
-
-  const externalSubmitImmediate = externalForm.watch('submit_immediately');
-  const externalWorkflowId = externalForm.watch('workflow_template_id');
 
   const externalMutation = useMutation({
     mutationFn: async (data: ExternalForm) => {
@@ -266,37 +218,11 @@ export default function CreateDocumentPage() {
         });
       }
 
-      if (data.submit_immediately && data.workflow_template_id) {
-        const wf = await orchestratorApi.startWorkflow({
-          template_id: data.workflow_template_id,
-          document_id: docId,
-        });
-        const wfTpl = workflowTemplates?.find((t) => t.id === data.workflow_template_id);
-        if (wfTpl) {
-          const role = getStep1Role(wfTpl);
-          if (role) {
-            try {
-              const assigneeId = await resolveRoleToUserId(role);
-              if (assigneeId) {
-                await tasksApi.create({
-                  workflow_instance_id: wf.workflow.id,
-                  step_number: 1,
-                  assignee_id: assigneeId,
-                });
-              }
-            } catch (e) {
-              console.warn('[external-doc] Task creation failed:', e);
-            }
-          }
-        }
-      }
-
       return docId;
     },
     onSuccess: (docId) => {
       toast.success('External correspondence saved');
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
-      SEEDED_USER_IDS.forEach((uid) => queryClient.invalidateQueries({ queryKey: QUERY_KEYS.tasks(uid) }));
       navigate(`/documents/${docId}`);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -408,6 +334,41 @@ export default function CreateDocumentPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>
+                    Document template <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={documentTemplateId?.trim() ? documentTemplateId : undefined}
+                    onValueChange={(v) => {
+                      lastAppliedDocumentTemplateId.current = null;
+                      internalForm.setValue('document_template_id', v, { shouldValidate: true });
+                    }}
+                  >
+                    <SelectTrigger
+                      className={
+                        internalForm.formState.errors.document_template_id ? 'border-destructive' : undefined
+                      }
+                    >
+                      <SelectValue placeholder="Select a catalogue template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {documentTemplates?.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name} ({t.status})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {internalForm.formState.errors.document_template_id && (
+                    <p className="text-xs text-destructive">
+                      {internalForm.formState.errors.document_template_id.message}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Title, body, and department update when you change template.
+                  </p>
+                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="department">
                     Department <span className="text-destructive">*</span>
@@ -554,69 +515,6 @@ export default function CreateDocumentPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Zap className="h-4 w-4" /> Workflow
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <label
-                className={cn(
-                  'flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all',
-                  submitImmediately ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-border text-primary accent-primary"
-                  checked={submitImmediately}
-                  onChange={(e) => internalForm.setValue('submit_immediately', e.target.checked)}
-                />
-                <div>
-                  <p className="text-sm font-medium text-foreground">Start workflow after create</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Runs workflow engine on this document (same as orchestrator workflow-start).
-                  </p>
-                </div>
-              </label>
-
-              {submitImmediately && (
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label>
-                      Workflow template <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={workflowTemplateId ?? ''}
-                      onValueChange={(v) => internalForm.setValue('workflow_template_id', v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select workflow template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {workflowTemplates?.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name} ({t.steps.length} step{t.steps.length !== 1 ? 's' : ''})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {step1Role && (
-                    <Alert variant="info">
-                      <AlertDescription>
-                        A task may be assigned to a <strong className="capitalize">{step1Role}</strong> for step 1
-                        when possible (seed users resolved by role).
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <div className="flex items-center justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => navigate('/documents')}>
               Cancel
@@ -624,12 +522,8 @@ export default function CreateDocumentPage() {
             <Button type="button" variant="outline" onClick={() => setPreview(true)}>
               <Eye className="h-4 w-4" /> Preview
             </Button>
-            <Button
-              type="submit"
-              loading={internalMutation.isPending}
-              disabled={submitImmediately && !workflowTemplateId}
-            >
-              {submitImmediately && workflowTemplateId ? 'Create & start workflow' : 'Create document'}
+            <Button type="submit" loading={internalMutation.isPending} disabled={!documentTemplateId?.trim()}>
+              Create document
             </Button>
           </div>
         </form>
@@ -751,72 +645,12 @@ export default function CreateDocumentPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Zap className="h-4 w-4" /> Workflow after upload
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <label
-                className={cn(
-                  'flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all',
-                  externalSubmitImmediate ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-border text-primary accent-primary"
-                  checked={externalSubmitImmediate}
-                  onChange={(e) => externalForm.setValue('submit_immediately', e.target.checked)}
-                />
-                <div>
-                  <p className="text-sm font-medium text-foreground">Start workflow after upload</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Submit triggers routing workflow once the file and metadata are saved.
-                  </p>
-                </div>
-              </label>
-
-              {externalSubmitImmediate && (
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label>
-                      Workflow template <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={externalWorkflowId ?? ''}
-                      onValueChange={(v) => externalForm.setValue('workflow_template_id', v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select workflow template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {workflowTemplates?.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <div className="flex justify-end gap-3 flex-wrap">
             <Button type="button" variant="outline" onClick={() => navigate('/documents')}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              loading={externalMutation.isPending}
-              disabled={!externalFile || (externalSubmitImmediate && !externalWorkflowId)}
-            >
-              {externalSubmitImmediate && externalWorkflowId
-                ? 'Upload, tag recipients & start workflow'
-                : 'Upload document'}
+            <Button type="submit" loading={externalMutation.isPending} disabled={!externalFile}>
+              Upload document
             </Button>
           </div>
         </form>

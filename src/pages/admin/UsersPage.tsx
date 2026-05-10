@@ -36,15 +36,57 @@ const ROLE_COLORS: Record<string, string> = {
   submitter: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:ring-emerald-800',
 };
 
-const PERM_COLORS: Record<string, string> = {
-  read:    'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  write:   'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400',
-  approve: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400',
-  reject:  'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400',
-  delete:  'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400',
+/** Canonical permission keys (aligned with backend `permissions` table / JWT claims). */
+const ALL_PERMISSIONS = [
+  'view_document',
+  'create_document',
+  'edit_document',
+  'submit_document',
+  'approve_document',
+  'reject_document',
+  'sign_document',
+  'archive_document',
+  'delegate_approval',
+  'view_audit_logs',
+  'manage_users',
+  'manage_roles',
+] as const;
+
+const LEGACY_TO_CANON: Record<string, string> = {
+  read: 'view_document',
+  write: 'edit_document',
+  delete: 'archive_document',
+  approve: 'approve_document',
+  reject: 'reject_document',
 };
 
-const ALL_PERMISSIONS = ['read', 'write', 'approve', 'reject', 'delete'];
+function normalizePermissionNames(input: string[] | undefined): string[] {
+  if (!input?.length) return [];
+  const canon = input.map((p) => LEGACY_TO_CANON[p] ?? p);
+  const valid = canon.filter((p) => (ALL_PERMISSIONS as readonly string[]).includes(p));
+  return [...new Set(valid)];
+}
+
+function permissionHas(rolePerms: string[], key: string): boolean {
+  if (rolePerms.includes(key)) return true;
+  const legacyKey = Object.entries(LEGACY_TO_CANON).find(([, v]) => v === key)?.[0];
+  return legacyKey ? rolePerms.includes(legacyKey) : false;
+}
+
+const PERM_COLORS: Record<string, string> = {
+  view_document: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  create_document: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-400',
+  edit_document: 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400',
+  submit_document: 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-400',
+  approve_document: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400',
+  reject_document: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400',
+  sign_document: 'bg-violet-50 text-violet-800 dark:bg-violet-950/40 dark:text-violet-400',
+  archive_document: 'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400',
+  delegate_approval: 'bg-teal-50 text-teal-800 dark:bg-teal-950/40 dark:text-teal-400',
+  view_audit_logs: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-400',
+  manage_users: 'bg-fuchsia-50 text-fuchsia-900 dark:bg-fuchsia-950/40 dark:text-fuchsia-400',
+  manage_roles: 'bg-pink-50 text-pink-900 dark:bg-pink-950/40 dark:text-pink-400',
+};
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const createUserSchema = z.object({
@@ -76,6 +118,7 @@ export default function UsersPage() {
   const [resetPwUser,       setResetPwUser]        = useState<UserRecord | null>(null);
   const [deactivateUser,    setDeactivateUser]     = useState<UserRecord | null>(null);
   const [manageRolesUser,   setManageRolesUser]    = useState<UserRecord | null>(null);
+  const [editPermRole,      setEditPermRole]       = useState<Role | null>(null);
 
   // ── Queries ──
   const { data: users, isLoading: usersLoading } = useQuery({
@@ -151,7 +194,7 @@ export default function UsersPage() {
         {[
           { label: 'Total Users',  value: users?.length ?? 0,    icon: Users,  color: 'text-primary',                         bg: 'bg-primary/10' },
           { label: 'Total Roles',  value: allRoles?.length ?? 0, icon: Shield, color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-50 dark:bg-violet-900/20' },
-          { label: 'Permissions',  value: ALL_PERMISSIONS.length, icon: Key,   color: 'text-amber-600 dark:text-amber-400',   bg: 'bg-amber-50 dark:bg-amber-900/20' },
+          { label: 'Permission types', value: ALL_PERMISSIONS.length, icon: Key, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border border-border bg-card p-5 shadow-card">
             <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg mb-3', s.bg)}>
@@ -240,9 +283,12 @@ export default function UsersPage() {
                   <tr className="border-b border-border bg-muted/30">
                     <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
                     {ALL_PERMISSIONS.map((p) => (
-                      <th key={p} className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide capitalize">{p}</th>
+                      <th key={p} className="text-center px-2 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide max-w-[5rem] leading-tight">
+                        {p.replace(/_/g, ' ')}
+                      </th>
                     ))}
                     <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned to</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -257,7 +303,7 @@ export default function UsersPage() {
                         </td>
                         {ALL_PERMISSIONS.map((p) => (
                           <td key={p} className="text-center px-4 py-3.5">
-                            {role.permissions.includes(p) ? (
+                            {permissionHas(role.permissions ?? [], p) ? (
                               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">✓</span>
                             ) : (
                               <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/40 text-xs mx-auto">—</span>
@@ -273,6 +319,16 @@ export default function UsersPage() {
                               : <span className="text-xs text-muted-foreground">Unassigned</span>
                             }
                           </div>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditPermRole(role)}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                            Edit permissions
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -307,6 +363,16 @@ export default function UsersPage() {
           allRoles={allRoles ?? []}
           onClose={() => setManageRolesUser(null)}
           onSuccess={() => qc.invalidateQueries({ queryKey: ['admin-users'] })}
+        />
+      )}
+      {editPermRole && (
+        <RolePermissionsDialog
+          role={editPermRole}
+          onClose={() => setEditPermRole(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['admin-roles'] });
+            qc.invalidateQueries({ queryKey: ['admin-users'] });
+          }}
         />
       )}
       <ConfirmDialog
@@ -440,12 +506,12 @@ function ManageRolesDialog({ user, allRoles, onClose, onSuccess }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[85vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5" /> Manage Roles</DialogTitle>
           <DialogDescription>Toggle roles for <strong className="capitalize">{user.username}</strong>. Changes take effect immediately.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-2 py-2">
+        <div className="space-y-2 py-2 max-h-[55vh] overflow-y-auto pr-1">
           {allRoles.map((role) => {
             const assigned = currentRoleIds.has(role.id);
             return (
@@ -479,6 +545,91 @@ function ManageRolesDialog({ user, allRoles, onClose, onSuccess }: {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RolePermissionsDialog({
+  role,
+  onClose,
+  onSaved,
+}: {
+  role: Role;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [selectedPerms, setSelectedPerms] = useState<string[]>(
+    normalizePermissionNames(role.permissions ?? [])
+  );
+
+  useEffect(() => {
+    setSelectedPerms(normalizePermissionNames(role.permissions ?? []));
+  }, [role.id, role.permissions]);
+
+  const mutation = useMutation({
+    mutationFn: (permissionNames: string[]) => authApi.setRolePermissions(role.id, permissionNames),
+    onSuccess: () => {
+      toast.success(`Updated permissions for ${role.name}`);
+      onSaved();
+      onClose();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const togglePerm = (p: string) => {
+    setSelectedPerms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Edit className="h-5 w-5" /> Edit Role Permissions
+          </DialogTitle>
+          <DialogDescription>
+            Update permission grants for <strong className="capitalize">{role.name}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
+          {ALL_PERMISSIONS.map((p) => {
+            const active = selectedPerms.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => togglePerm(p)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all text-left',
+                  active
+                    ? 'border-primary bg-primary/8 text-primary'
+                    : 'border-border hover:border-primary/30 text-muted-foreground'
+                )}
+              >
+                <div
+                  className={cn(
+                    'h-4 w-4 rounded border-2 flex items-center justify-center shrink-0',
+                    active ? 'border-primary bg-primary' : 'border-muted-foreground/40'
+                  )}
+                >
+                  {active && <Check className="h-2.5 w-2.5 text-white" />}
+                </div>
+                {p.replace(/_/g, ' ')}
+              </button>
+            );
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" loading={mutation.isPending} onClick={() => mutation.mutate(selectedPerms)}>
+            Save permissions
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -539,7 +690,7 @@ function CreateRoleDialog({ open, onClose, onSuccess }: { open: boolean; onClose
                     <div className={cn('h-4 w-4 rounded border-2 flex items-center justify-center shrink-0', active ? 'border-primary bg-primary' : 'border-muted-foreground/40')}>
                       {active && <Check className="h-2.5 w-2.5 text-white" />}
                     </div>
-                    {p}
+                    {p.replace(/_/g, ' ')}
                   </button>
                 );
               })}
