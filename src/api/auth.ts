@@ -14,6 +14,12 @@ export interface UserRecord {
   email: string;
   created_at: string;
   roles: Role[];
+  full_name?: string | null;
+  phone?: string | null;
+  rank?: string | null;
+  department?: string | null;
+  zone?: string | null;
+  state?: string | null;
 }
 
 export const authApi = {
@@ -46,7 +52,17 @@ export const authApi = {
     return res.data;
   },
 
-  createUser: async (data: { username: string; email: string; password: string }): Promise<UserRecord> => {
+  createUser: async (data: {
+    username: string;
+    email: string;
+    password: string;
+    full_name?: string;
+    phone?: string;
+    rank?: string;
+    department?: string;
+    zone?: string;
+    state?: string;
+  }): Promise<UserRecord> => {
     const res = await authClient.post<UserRecord>('/auth/users', data);
     return res.data;
   },

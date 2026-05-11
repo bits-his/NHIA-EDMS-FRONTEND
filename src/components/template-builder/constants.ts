@@ -132,5 +132,5 @@ export const APPROVAL_ENTITY_LABELS = [
   'State Office Coordinator',
   'Zonal Coordinator',
   'Headquarters Management',
-  'Executive Secretary',
+  'Director General',
 ] as const;

@@ -18,7 +18,7 @@ export interface Role {
   id: string;
   name: string;
   permissions: string[];
-  /** NHIA grade ladder (1 = Officer … 10 = Executive Secretary), when defined */
+  /** NHIA grade ladder (1 = Officer … 10 = Director General), when defined */
   level?: number | null;
   description?: string | null;
 }

@@ -8,10 +8,10 @@ export const WORKFLOW_ASSIGNEE_ROLES = [
   { value: 'manager', label: 'Manager' },
   { value: 'senior_manager', label: 'Senior Manager' },
   { value: 'principal_manager', label: 'Principal Manager' },
-  { value: 'assistant_general_manager', label: 'Assistant General Manager' },
-  { value: 'deputy_general_manager', label: 'Deputy General Manager' },
-  { value: 'general_manager', label: 'General Manager' },
-  { value: 'executive_secretary', label: 'Executive Secretary' },
+  { value: 'assistant_general_manager', label: 'Assistant Director' },
+  { value: 'deputy_general_manager', label: 'Deputy Director' },
+  { value: 'general_manager', label: 'Director' },
+  { value: 'executive_secretary', label: 'Director General' },
 ] as const;
 
 /** Common linear workflow action_type values (stored as free string on backend). */

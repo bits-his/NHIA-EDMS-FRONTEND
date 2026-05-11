@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
@@ -18,11 +18,19 @@ import { Separator } from '@/components/ui/separator';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { authApi } from '@/api/auth';
+import { documentsApi } from '@/api/documents';
 import { tasksApi } from '@/api/tasks';
 import { QUERY_KEYS, SEEDED_USER_IDS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
@@ -90,9 +98,15 @@ const PERM_COLORS: Record<string, string> = {
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const createUserSchema = z.object({
-  username: z.string().min(2, 'At least 2 characters').max(50),
-  email:    z.string().email('Valid email required'),
-  password: z.string().min(6, 'At least 6 characters'),
+  username:   z.string().min(2, 'At least 2 characters').max(50),
+  email:      z.string().email('Valid email required'),
+  full_name:  z.string().max(255),
+  phone:      z.string().max(50),
+  rank:       z.string().max(100),
+  department: z.string().max(255),
+  zone:       z.string().max(100),
+  state:      z.string().max(100),
+  password:   z.string().min(6, 'At least 6 characters'),
 });
 
 const resetPasswordSchema = z.object({
@@ -107,6 +121,22 @@ const createRoleSchema = z.object({
 type CreateUserForm    = z.infer<typeof createUserSchema>;
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 type CreateRoleForm    = z.infer<typeof createRoleSchema>;
+
+/** Official designation titles — aligned with `nhia_designations` seed in backend migration 007. */
+const NHIA_STAFF_RANK_OPTIONS = [
+  'Director General',
+  'Director',
+  'Deputy Director',
+  'Assistant Director',
+  'Principal Manager',
+  'Senior Manager',
+  'Manager',
+  'Assistant Manager',
+  'Senior Officer',
+  'Officer',
+] as const;
+
+const SELECT_NONE = '__none__';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function UsersPage() {
@@ -391,12 +421,52 @@ export default function UsersPage() {
 
 // ── Create User Dialog ────────────────────────────────────────────────────────
 function CreateUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateUserForm>({
+  const { register, handleSubmit, reset, control, setValue, formState: { errors } } = useForm<CreateUserForm>({
     resolver: zodResolver(createUserSchema),
+    defaultValues: {
+      full_name: '',
+      phone: '',
+      rank: '',
+      department: '',
+      zone: '',
+      state: '',
+    },
   });
 
+  const watchedZone = useWatch({ control, name: 'zone' });
+
+  const { data: orgScope, isLoading: orgScopeLoading } = useQuery({
+    queryKey: QUERY_KEYS.orgScopeReference,
+    queryFn: () => documentsApi.getOrgScopeReference(),
+    enabled: open,
+    staleTime: 60_000,
+  });
+
+  const filteredStateOffices = useMemo(() => {
+    if (!orgScope?.stateOffices?.length) return [];
+    const z = orgScope.zones?.find((x) => x.name === watchedZone);
+    if (!watchedZone?.trim() || !z) return orgScope.stateOffices;
+    return orgScope.stateOffices.filter((s) => s.zoneCode === z.code);
+  }, [orgScope, watchedZone]);
+
   const mutation = useMutation({
-    mutationFn: (data: CreateUserForm) => authApi.createUser(data),
+    mutationFn: (data: CreateUserForm) => {
+      const pick = (s: string) => {
+        const v = s.trim();
+        return v.length > 0 ? v : undefined;
+      };
+      return authApi.createUser({
+        username: data.username.trim(),
+        email: data.email.trim(),
+        password: data.password,
+        full_name: pick(data.full_name),
+        phone: pick(data.phone),
+        rank: pick(data.rank),
+        department: pick(data.department),
+        zone: pick(data.zone),
+        state: pick(data.state),
+      });
+    },
     onSuccess: () => {
       toast.success('User created successfully');
       onSuccess();
@@ -408,28 +478,174 @@ function CreateUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5" /> Create New User</DialogTitle>
           <DialogDescription>Add a new user to the system. They can log in immediately with the provided credentials.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="cu-username">Username</Label>
-            <Input id="cu-username" placeholder="e.g. john" error={!!errors.username} {...register('username')} />
-            {errors.username && <p className="text-xs text-destructive">{errors.username.message}</p>}
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="flex flex-col min-h-0">
+          <div className="space-y-4 px-6 overflow-y-auto pb-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="cu-username">Username</Label>
+              <Input id="cu-username" placeholder="e.g. john" error={!!errors.username} {...register('username')} />
+              {errors.username && <p className="text-xs text-destructive">{errors.username.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cu-email">Email</Label>
+              <Input id="cu-email" type="email" placeholder="john@example.com" error={!!errors.email} {...register('email')} />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cu-full_name">Full name</Label>
+              <Input id="cu-full_name" placeholder="Legal name as on record" error={!!errors.full_name} {...register('full_name')} />
+              {errors.full_name && <p className="text-xs text-destructive">{errors.full_name.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cu-phone">Phone</Label>
+              <Input id="cu-phone" type="tel" placeholder="+234 …" error={!!errors.phone} {...register('phone')} />
+              {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-rank">Rank</Label>
+                <Controller
+                  name="rank"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="cu-rank"
+                        className={cn(errors.rank && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder="Select rank…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {NHIA_STAFF_RANK_OPTIONS.map((title) => (
+                          <SelectItem key={title} value={title}>
+                            {title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.rank && <p className="text-xs text-destructive">{errors.rank.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-department">Department</Label>
+                <Controller
+                  name="department"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="cu-department"
+                        className={cn(errors.department && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder={orgScope ? 'Select department…' : 'Loading…'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {(orgScope?.departments ?? []).map((d) => (
+                          <SelectItem key={d.id} value={d.name}>
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.department && <p className="text-xs text-destructive">{errors.department.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-zone">Zone</Label>
+                <Controller
+                  name="zone"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => {
+                        field.onChange(v === SELECT_NONE ? '' : v);
+                        setValue('state', '');
+                      }}
+                    >
+                      <SelectTrigger
+                        id="cu-zone"
+                        className={cn(errors.zone && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder={orgScope ? 'Select zone…' : 'Loading…'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {(orgScope?.zones ?? []).map((z) => (
+                          <SelectItem key={z.code} value={z.name}>
+                            {z.code} — {z.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.zone && <p className="text-xs text-destructive">{errors.zone.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-state">State</Label>
+                <Controller
+                  name="state"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope || !watchedZone?.trim()}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="cu-state"
+                        className={cn(errors.state && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue
+                          placeholder={
+                            !orgScope
+                              ? 'Loading…'
+                              : !watchedZone?.trim()
+                                ? 'Select zone first…'
+                                : 'Select state office…'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {filteredStateOffices.map((s) => (
+                          <SelectItem key={`${s.zoneCode}-${s.name}`} value={s.name}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.state && <p className="text-xs text-destructive">{errors.state.message}</p>}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cu-password">Password</Label>
+              <Input id="cu-password" type="password" placeholder="Min. 6 characters" error={!!errors.password} {...register('password')} />
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="cu-email">Email</Label>
-            <Input id="cu-email" type="email" placeholder="john@example.com" error={!!errors.email} {...register('email')} />
-            {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="cu-password">Password</Label>
-            <Input id="cu-password" type="password" placeholder="Min. 6 characters" error={!!errors.password} {...register('password')} />
-            {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
-          </div>
-          <DialogFooter>
+          <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 shrink-0">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" loading={mutation.isPending}><UserPlus className="h-4 w-4" /> Create User</Button>
           </DialogFooter>
