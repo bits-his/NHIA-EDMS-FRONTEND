@@ -127,3 +127,37 @@ code {
   padding: revert;
   list-style: revert;
 }
+/* Tables: column resize (TableColumnResize) needs room; theme applies .ck-table-resized + fixed layout. */
+.ck-editor__editable {
+  overflow-x: auto;
+}
+.ck-editor__editable figure.table,
+.ck-editor__editable .table {
+  width: 100%;
+  max-width: 100%;
+  margin-inline: 0;
+}
+.ck-editor__editable figure.table table,
+.ck-editor__editable .table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ck-editor__editable .table td,
+.ck-editor__editable .table th,
+.ck-editor__editable figure.table td,
+.ck-editor__editable figure.table th {
+  white-space: normal;
+  min-width: 2.5ch;
+  overflow-wrap: break-word;
+  position: relative;
+}
+.ck-editor__editable input[type='checkbox'] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  inline-size: 1rem;
+  block-size: 1rem;
+  vertical-align: middle;
+  pointer-events: auto;
+  cursor: pointer;
+  accent-color: var(--accent, #aa3bff);
+}

@@ -70,6 +70,8 @@ export const QUERY_KEYS = {
   tasks: (assigneeId: string) => ['tasks', assigneeId],
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
+  auditLogsForDocument: (documentId: string) => ['audit-logs', 'for-document', documentId] as const,
+  auditLogsRecent: (limit: number) => ['audit-logs-recent', limit] as const,
   notifications: (userId: string) => ['notifications', userId],
   notificationsUnread: (userId: string) => ['notifications-unread', userId],
   orchestratorStatus: (docId: string) => ['orchestrator-status', docId],
@@ -78,6 +80,7 @@ export const QUERY_KEYS = {
   documentAttachments: (id: string) => ['document-attachments', id],
   documentsSearch: (filters: object) => ['documents-search', filters],
   documentWorkflowActions: (id: string) => ['document-workflow-actions', id],
+  documentSignatorySignature: (id: string) => ['document-signatory-signature', id],
   workflowInstanceByDocument: (documentId: string) => ['workflow-instance-by-document', documentId],
   workflowBpmnView: (workflowInstanceId: string, documentStatus?: string) => [
     'workflow-bpmn-view',
@@ -91,6 +94,8 @@ export const QUERY_KEYS = {
   documentTemplates: 'document-templates',
   documentTemplate: (id: string) => ['document-template', id],
   orgScopeReference: ['org-scope-reference'] as const,
+  userProfile: (userId: string) => ['user-profile', userId],
+  userSignatureBlob: (userId: string) => ['user-signature-blob', userId],
 } as const;
 
 export const OCR_ACCEPTED_TYPES = {

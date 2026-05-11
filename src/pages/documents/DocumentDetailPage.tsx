@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -51,12 +51,17 @@ import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { documentsApi } from '@/api/documents';
 import { auditApi } from '@/api/audit';
 import { authApi } from '@/api/auth';
+import { tasksApi } from '@/api/tasks';
+import { workflowApi } from '@/api/workflow';
 import { useAuthStore } from '@/stores/authStore';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDateTime, formatRelative } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
 import { isUuid } from '@/utils/uuid';
+import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
+import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
+import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import type { RecipientType } from '@/types/document';
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -83,16 +88,105 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid,
   });
 
+  const isInternalMemo = doc?.category === 'internal_memo';
+
+  const { data: orgScope } = useQuery({
+    queryKey: QUERY_KEYS.orgScopeReference,
+    queryFn: () => documentsApi.getOrgScopeReference(),
+    enabled: documentIdValid && isInternalMemo,
+  });
+
+  const templateId = doc?.template_id;
+  const { data: docTemplate } = useQuery({
+    queryKey: QUERY_KEYS.documentTemplate(templateId ?? '__none__'),
+    queryFn: () => documentsApi.getTemplate(templateId!),
+    enabled: documentIdValid && isInternalMemo && !!templateId,
+  });
+
+  const { data: signatorySignatureObjectUrl } = useQuery({
+    queryKey: QUERY_KEYS.documentSignatorySignature(id!),
+    queryFn: async () => {
+      const blob = await documentsApi.getDocumentSignatorySignatureBlob(id!);
+      return URL.createObjectURL(blob);
+    },
+    enabled: documentIdValid && isInternalMemo && !!doc?.signatory_id,
+    retry: false,
+    throwOnError: false,
+  });
+
+  useEffect(() => {
+    return () => {
+      if (signatorySignatureObjectUrl) URL.revokeObjectURL(signatorySignatureObjectUrl);
+    };
+  }, [signatorySignatureObjectUrl]);
+
+  const { data: myTasks } = useQuery({
+    queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
+    queryFn: () => tasksApi.list(user!.user_id),
+    enabled: !!user?.user_id && doc?.status === 'pending',
+  });
+
+  const { data: wfInstance } = useQuery({
+    queryKey: QUERY_KEYS.workflowInstanceByDocument(id!),
+    queryFn: () => workflowApi.getInstanceByDocumentId(id!),
+    enabled: documentIdValid && doc?.status === 'pending',
+  });
+
+  const { data: wfTemplate } = useQuery({
+    queryKey: QUERY_KEYS.workflowTemplate(wfInstance?.template_id ?? ''),
+    queryFn: () => workflowApi.getTemplateById(wfInstance!.template_id),
+    enabled: !!wfInstance?.template_id,
+  });
+
+  const hasActiveWorkflowTaskForDoc = useMemo(
+    () => hasActiveTaskOnCurrentWorkflowStep(myTasks, doc?.id ?? '', wfInstance),
+    [myTasks, doc?.id, wfInstance]
+  );
+
+  const wfMaxStep = useMemo(() => {
+    if (!wfTemplate?.steps?.length) return 0;
+    const nums = wfTemplate.steps.map((s) => {
+      const raw = s.step_number ?? ('step' in s ? (s as { step?: number }).step : undefined);
+      const n = Number(raw ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    });
+    return Math.max(...nums, 0);
+  }, [wfTemplate]);
+
+  const workflowAdvanceControl = useMemo(() => {
+    if (!doc || doc.status !== 'pending' || !wfInstance) return null;
+    const active = new Set(['active', 'in_progress', 'pending_approval', 'pending_review']);
+    if (!active.has(wfInstance.status)) return null;
+    if (wfMaxStep < 1 || (wfInstance.current_step ?? 0) >= wfMaxStep) return null;
+    if (!hasActiveWorkflowTaskForDoc) return null;
+    return { workflowInstanceId: wfInstance.id };
+  }, [doc, wfInstance, wfMaxStep, hasActiveWorkflowTaskForDoc]);
+
+  const pendingStageLabel = useMemo(
+    () =>
+      doc?.status === 'pending'
+        ? getPendingDocumentWorkflowStageLabel(wfInstance ?? undefined, wfTemplate ?? undefined)
+        : null,
+    [doc?.status, wfInstance, wfTemplate]
+  );
+
   const { data: versions, isLoading: versionsLoading } = useQuery({
     queryKey: QUERY_KEYS.documentVersions(id!),
     queryFn: () => documentsApi.getVersions(id!),
     enabled: documentIdValid,
   });
 
-  const { data: auditLogs, isLoading: auditLoading } = useQuery({
-    queryKey: QUERY_KEYS.auditLogs({ entity_type: 'document', entity_id: id }),
-    queryFn: () => auditApi.getLogs({ entity_type: 'document', entity_id: id }),
+  const {
+    data: auditLogs,
+    isLoading: auditLoading,
+    isError: auditIsError,
+    error: auditError,
+    refetch: refetchAudit,
+  } = useQuery({
+    queryKey: QUERY_KEYS.auditLogsForDocument(id!),
+    queryFn: () => auditApi.getLogsForDocument(id!),
     enabled: documentIdValid,
+    retry: 1,
   });
 
   const { data: recipients } = useQuery({
@@ -121,14 +215,39 @@ export default function DocumentDetailPage() {
 
   const previewMutation = useMutation({
     mutationFn: () => documentsApi.getPreviewHtml(id!),
-    onSuccess: (html) => {
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    },
-    onError: (e) => toast.error(getErrorMessage(e)),
   });
+
+  /** Open a tab synchronously on click (user gesture), then stream HTML — avoids pop-up blockers. */
+  const openOfficialPreview = () => {
+    if (!id) return;
+    const w = window.open('about:blank', '_blank');
+    if (!w) {
+      toast.error('Could not open preview. Allow pop-ups for this site and try again.');
+      return;
+    }
+    previewMutation.mutate(undefined, {
+      onSuccess: (html) => {
+        try {
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+        } catch {
+          w.close();
+          toast.error('Preview could not be displayed. Try again or check browser restrictions.');
+          return;
+        }
+        try {
+          w.opener = null;
+        } catch {
+          /* ignore */
+        }
+      },
+      onError: (e) => {
+        w.close();
+        toast.error(getErrorMessage(e));
+      },
+    });
+  };
 
   const addRecipientMutation = useMutation({
     mutationFn: () =>
@@ -221,7 +340,7 @@ export default function DocumentDetailPage() {
                   {doc.title}
                 </h1>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <DocumentStatusBadge status={doc.status} />
+                  <DocumentStatusBadge status={doc.status} pendingStageLabel={pendingStageLabel} />
                   {doc.category && (
                     <Badge variant="secondary" className="text-xs font-normal">
                       <Tag className="h-3 w-3 mr-1" />
@@ -263,12 +382,22 @@ export default function DocumentDetailPage() {
                   variant="outline"
                   size="sm"
                   loading={previewMutation.isPending}
-                  onClick={() => previewMutation.mutate()}
+                  onClick={openOfficialPreview}
                 >
                   <Eye className="h-4 w-4" /> Official preview (letterhead)
                 </Button>
               )}
-              <DocumentActions document={doc} roles={user?.roles ?? []} />
+              <DocumentActions
+                document={doc}
+                roles={user?.roles ?? []}
+                actionContext={{
+                  permissions: user?.permissions ?? [],
+                  userId: user?.user_id,
+                  ownerId: doc.owner_id,
+                  hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+                }}
+                workflowAdvance={workflowAdvanceControl}
+              />
             </div>
           </div>
 
@@ -406,10 +535,37 @@ export default function DocumentDetailPage() {
                   )}
                   <Separator className="mb-5" />
                   {doc.content ? (
-                    <div
-                      className="prose prose-sm max-w-none bg-muted/30 rounded-lg border border-border/50 p-4 text-foreground"
-                      dangerouslySetInnerHTML={{ __html: doc.content }}
-                    />
+                    doc.category === 'internal_memo' ? (
+                      <div className="rounded-lg border border-border/60 bg-white shadow-sm overflow-hidden">
+                        <NhiaMemoLetterhead
+                          documentTypeLabel={docTemplate?.name}
+                          zoneCode={docTemplate?.metadata?.zone}
+                          stateOfficeName={docTemplate?.metadata?.state_office}
+                          zones={orgScope?.zones}
+                        />
+                        <div
+                          className="prose prose-sm max-w-none px-8 py-4 border-t border-border/40 text-foreground"
+                          dangerouslySetInnerHTML={{ __html: doc.content }}
+                        />
+                        {doc.signatory_id && signatorySignatureObjectUrl ? (
+                          <div className="border-t border-border/60 bg-white px-8 py-6">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                              Authorised signatory
+                            </p>
+                            <img
+                              src={signatorySignatureObjectUrl}
+                              alt="Signature"
+                              className="max-h-24 max-w-[280px] object-contain"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div
+                        className="prose prose-sm max-w-none bg-muted/30 rounded-lg border border-border/50 p-4 text-foreground"
+                        dangerouslySetInnerHTML={{ __html: doc.content }}
+                      />
+                    )
                   ) : (
                     <p className="text-sm text-muted-foreground italic text-center py-8">
                       {doc.category === 'external_correspondence'
@@ -442,7 +598,15 @@ export default function DocumentDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <AuditTimeline logs={auditLogs ?? []} loading={auditLoading} />
+                  {auditIsError ? (
+                    <ErrorState
+                      error={auditError}
+                      title="Could not load audit trail"
+                      onRetry={() => void refetchAudit()}
+                    />
+                  ) : (
+                    <AuditTimeline logs={auditLogs ?? []} loading={auditLoading} />
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -475,8 +639,9 @@ export default function DocumentDetailPage() {
                 versionsLoading={versionsLoading}
               />
               <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
-                Official letterhead preview uses a standard layout. The signatory signature image is included after{' '}
-                <strong>Final approval</strong> when the approver is registered as an active signatory.
+                Official preview opens in a new tab: NHIA letterhead plus memo layout (custom templates get the same NHIA
+                banner above the template HTML). After <strong>Final approval</strong>, the signatory signature is
+                shown in preview and below the body on the Content tab.
               </p>
             </aside>
           </div>

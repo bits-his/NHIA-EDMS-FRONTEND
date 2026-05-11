@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -13,8 +14,10 @@ import { TaskStatusBadge } from '@/components/tasks/TaskStatusBadge';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { tasksApi } from '@/api/tasks';
 import { documentsApi } from '@/api/documents';
+import { workflowApi } from '@/api/workflow';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
+import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
 import { formatDateTime, formatRelative, isOverdue } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { cn } from '@/utils/cn';
@@ -43,6 +46,27 @@ export default function TaskDetailPage() {
     queryFn: () => documentsApi.getById(task!.document_id!),
     enabled: !!task?.document_id,
   });
+
+  const documentId = document?.id;
+  const { data: wfInstance } = useQuery({
+    queryKey: QUERY_KEYS.workflowInstanceByDocument(documentId ?? ''),
+    queryFn: () => workflowApi.getInstanceByDocumentId(documentId!),
+    enabled: !!documentId && document?.status === 'pending',
+  });
+
+  const { data: wfTemplate } = useQuery({
+    queryKey: QUERY_KEYS.workflowTemplate(wfInstance?.template_id ?? ''),
+    queryFn: () => workflowApi.getTemplateById(wfInstance!.template_id),
+    enabled: !!wfInstance?.template_id,
+  });
+
+  const pendingStageLabel = useMemo(
+    () =>
+      document?.status === 'pending'
+        ? getPendingDocumentWorkflowStageLabel(wfInstance ?? undefined, wfTemplate ?? undefined)
+        : null,
+    [document?.status, wfInstance, wfTemplate]
+  );
 
   const updateMutation = useMutation({
     mutationFn: (status: TaskStatus) => {
@@ -157,7 +181,7 @@ export default function TaskDetailPage() {
                         Owner: {resolveUsername(document.owner_id)}
                       </p>
                     </div>
-                    <DocumentStatusBadge status={document.status} />
+                    <DocumentStatusBadge status={document.status} pendingStageLabel={pendingStageLabel} />
                   </div>
                   {document.content && (
                     <div

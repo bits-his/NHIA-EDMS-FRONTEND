@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { formatDateTime, formatRelative } from '@/utils/formatters';
 import type { DocumentStatus } from '@/types/document';
-import axios from 'axios';
 import { WorkflowFlowchartView } from '@/components/workflows/WorkflowFlowchartView';
 
 interface WorkflowBpmnPanelProps {
@@ -19,14 +18,13 @@ export function WorkflowBpmnPanel({ documentId, documentStatus }: WorkflowBpmnPa
     data: instance,
     isLoading: instLoading,
     isError: instError,
-    error: instErr,
   } = useQuery({
     queryKey: QUERY_KEYS.workflowInstanceByDocument(documentId),
     queryFn: () => workflowApi.getInstanceByDocumentId(documentId),
     retry: false,
   });
 
-  const wfId = instance?.id;
+  const wfId = instance?.id ?? undefined;
 
   const { data: view, isLoading: viewLoading } = useQuery({
     queryKey: QUERY_KEYS.workflowBpmnView(wfId ?? '', documentStatus),
@@ -40,11 +38,6 @@ export function WorkflowBpmnPanel({ documentId, documentStatus }: WorkflowBpmnPa
     enabled: !!wfId,
   });
 
-  const notFound =
-    instError &&
-    axios.isAxiosError(instErr) &&
-    (instErr.response?.status === 404 || instErr.response?.status === 403);
-
   if (instLoading) {
     return (
       <div className="space-y-3">
@@ -54,17 +47,17 @@ export function WorkflowBpmnPanel({ documentId, documentStatus }: WorkflowBpmnPa
     );
   }
 
-  if (notFound) {
+  if (!instError && instance === null) {
     return (
       <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 px-4 py-8 text-center text-sm text-muted-foreground">
         <GitBranch className="h-8 w-8 mx-auto mb-2 opacity-50" />
-        No workflow instance is linked to this document yet. Starting a workflow from the submission flow will
-        attach routing here.
+        No workflow instance is linked to this document yet. Submit the memo for review (when it is in draft) to
+        start the workflow assigned on its template, if any.
       </div>
     );
   }
 
-  if (instError && !notFound) {
+  if (instError) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50/80 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-200">
         Could not load workflow information.

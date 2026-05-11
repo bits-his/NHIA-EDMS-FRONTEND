@@ -11,6 +11,7 @@ export type TemplateFormFields = {
   version: string;
   description: string;
   docType: string;
+  workflowTemplateId: string;
   scopeLevel: string;
   hq: string;
   stateOffice: string;
@@ -49,6 +50,7 @@ export function buildDocumentTemplatePayload(
   const departmentPrimary = fields.department.trim() || 'NHIA';
 
   const metadata: DocumentTemplateMetadata = {
+    workflow_template_id: fields.workflowTemplateId.trim() || undefined,
     template_code: fields.code.trim(),
     version_label: fields.version.trim(),
     description: fields.description.trim(),
@@ -113,6 +115,7 @@ export function templateRowToFormFields(t: DocumentTemplate): TemplateFormFields
     version: m.version_label ?? '1.0.0',
     description: m.description ?? '',
     docType: t.category,
+    workflowTemplateId: m.workflow_template_id ?? '',
     scopeLevel,
     hq: m.hq ?? '',
     stateOffice: scopeAll ? 'all' : (m.state_office ?? ''),

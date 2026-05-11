@@ -1,5 +1,12 @@
 import { authClient } from './client';
-import type { LoginRequest, LoginResponse, ValidateResponse, UserRolesResponse, Role } from '@/types/auth';
+import type {
+  LoginRequest,
+  LoginResponse,
+  ValidateResponse,
+  UserRolesResponse,
+  Role,
+  UserProfile,
+} from '@/types/auth';
 
 export interface UserRecord {
   id: string;
@@ -24,6 +31,11 @@ export const authApi = {
     const res = await authClient.get<UserRolesResponse>(`/auth/users/${userId}/roles`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
+    return res.data;
+  },
+
+  getProfile: async (userId: string): Promise<UserProfile> => {
+    const res = await authClient.get<UserProfile>(`/auth/users/${userId}/profile`);
     return res.data;
   },
 

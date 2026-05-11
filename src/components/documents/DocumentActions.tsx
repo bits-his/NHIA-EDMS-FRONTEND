@@ -11,6 +11,7 @@ import {
   MessageSquareWarning,
   Info,
   ShieldCheck,
+  StepForward,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -25,17 +26,24 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { documentsApi } from '@/api/documents';
-import { getDocumentActions } from '@/utils/permissions';
+import { workflowApi } from '@/api/workflow';
+import { getDocumentActions, type DocumentActionContext } from '@/utils/permissions';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
+import { startWorkflowFromDocumentTemplate } from '@/utils/startWorkflowFromDocumentTemplate';
 import type { Document } from '@/types/document';
+import { useAuthStore } from '@/stores/authStore';
 
 interface DocumentActionsProps {
   document: Document;
   roles: string[];
+  /** When omitted, draft submit/edit still works for admin/submitter only (legacy). */
+  actionContext?: DocumentActionContext;
+  /** When set, show “Forward workflow” for linear advance (assignee or reviewer). */
+  workflowAdvance?: { workflowInstanceId: string } | null;
 }
 
-type ConfirmActionType = 'submit' | 'archive';
+type ConfirmActionType = 'submit' | 'archive' | 'advanceWorkflow';
 
 type CommentDialogKind =
   | 'reject'
@@ -44,14 +52,16 @@ type CommentDialogKind =
   | 'approveForward'
   | 'finalApprove';
 
-export function DocumentActions({ document, roles }: DocumentActionsProps) {
+export function DocumentActions({ document, roles, actionContext, workflowAdvance }: DocumentActionsProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const currentUserId = useAuthStore((s) => s.user?.user_id);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmActionType | null>(null);
   const [commentDialog, setCommentDialog] = useState<CommentDialogKind | null>(null);
   const [comment, setComment] = useState('');
+  const [submitForReviewLoading, setSubmitForReviewLoading] = useState(false);
 
-  const actions = getDocumentActions(document.status, roles);
+  const actions = getDocumentActions(document.status, roles, actionContext);
 
   const invalidateDoc = () => {
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.document(document.id) });
@@ -60,6 +70,10 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.orchestratorStatus(document.id) });
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentWorkflowActions(document.id) });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowInstanceByDocument(document.id) });
+    if (currentUserId) {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.tasks(currentUserId) });
+    }
   };
 
   const mutation = useMutation({
@@ -165,6 +179,30 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     },
   };
 
+  const advanceMutation = useMutation({
+    mutationFn: () => workflowApi.advance(workflowAdvance!.workflowInstanceId),
+    onSuccess: (data) => {
+      if (data.workflow.status === 'completed') {
+        toast.success('Workflow completed — this was the final step.');
+      } else {
+        toast.success('Workflow advanced to the next step');
+      }
+      if (data.warnings?.length) {
+        toast.warning('Workflow moved, but some notifications or tasks could not be updated.');
+      }
+      invalidateDoc();
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === 'workflow-bpmn-view' &&
+          q.queryKey[1] === data.workflow.id,
+      });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowSteps(data.workflow.id) });
+      setPendingConfirm(null);
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
   const anyPrimaryButton =
     actions.canSubmit ||
     actions.canFinalApprove ||
@@ -172,7 +210,8 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
     actions.canArchive ||
     actions.canEditForward ||
     actions.canApproveForward ||
-    actions.canRequestInfo;
+    actions.canRequestInfo ||
+    !!workflowAdvance;
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
 
@@ -193,6 +232,12 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
           <Button variant="default" size="sm" onClick={() => setPendingConfirm('submit')}>
             <Send className="h-4 w-4" />
             Submit for review
+          </Button>
+        )}
+        {workflowAdvance && (
+          <Button variant="default" size="sm" onClick={() => setPendingConfirm('advanceWorkflow')}>
+            <StepForward className="h-4 w-4" />
+            Forward workflow
           </Button>
         )}
         {actions.canEditForward && (
@@ -238,16 +283,32 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
           open
           onOpenChange={(open) => !open && setPendingConfirm(null)}
           title="Submit document"
-          description="This submits the document for review. You will not be able to edit content until it is rejected back to draft."
+          description="This submits the document for review. If this memo’s template has an assigned workflow, that workflow starts now. You will not be able to edit content until it is rejected back to draft."
           confirmLabel="Submit"
           variant="default"
-          onConfirm={() =>
-            mutation.mutate({
-              fn: () => documentsApi.submit(document.id),
-              message: 'Document submitted for review',
-            })
-          }
-          loading={mutation.isPending}
+          onConfirm={async () => {
+            setSubmitForReviewLoading(true);
+            try {
+              await documentsApi.submit(document.id);
+              const wf = await startWorkflowFromDocumentTemplate(document.id, document.template_id);
+              if (wf.error) {
+                toast.error(
+                  `Document submitted for review, but the workflow did not start: ${wf.error}`
+                );
+              } else if (wf.started) {
+                toast.success('Document submitted for review and workflow started');
+              } else {
+                toast.success('Document submitted for review');
+              }
+              invalidateDoc();
+              setPendingConfirm(null);
+            } catch (error) {
+              toast.error(getErrorMessage(error));
+            } finally {
+              setSubmitForReviewLoading(false);
+            }
+          }}
+          loading={submitForReviewLoading || mutation.isPending}
         />
       )}
 
@@ -266,6 +327,19 @@ export function DocumentActions({ document, roles }: DocumentActionsProps) {
             })
           }
           loading={mutation.isPending}
+        />
+      )}
+
+      {pendingConfirm === 'advanceWorkflow' && workflowAdvance && (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => !open && setPendingConfirm(null)}
+          title="Forward workflow"
+          description="Mark your current workflow step as done and move the case to the next role in the chain. If this is the last step, the workflow completes."
+          confirmLabel="Forward"
+          variant="default"
+          onConfirm={() => advanceMutation.mutate()}
+          loading={advanceMutation.isPending}
         />
       )}
 

@@ -157,11 +157,7 @@ export function WorkflowEditorDialog({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit workflow' : 'Create custom workflow'}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? 'Change the workflow name and linear approval steps. Existing documents keep their history; new instances use this definition.'
-              : 'Define your own approval chain (linear steps). This saves a new workflow template you can use when creating a document.'}
-          </DialogDescription>
+         
         </DialogHeader>
 
         {isEdit && loadingTemplate && open ? (

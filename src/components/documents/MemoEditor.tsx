@@ -6,7 +6,10 @@ import {
   List,
   Indent, IndentBlock,
   Alignment,
-  Table, TableToolbar,
+  Table,
+  TableToolbar,
+  TableColumnResize,
+  GeneralHtmlSupport,
   Link,
   Undo,
 } from 'ckeditor5';
@@ -46,6 +49,63 @@ const INITIAL_CONTENT = `
 <p><strong>Date:</strong> &nbsp;</p>
 `;
 
+function normalizeEditorHtml(html: string): string {
+  if (!html) return html;
+  return (
+    html
+      // Allow checkbox interaction in editable content.
+      .replace(/(<input\b[^>]*\btype\s*=\s*["']checkbox["'][^>]*?)\sdisabled(\s|>)/gi, '$1$2')
+      .replace(/(<input\b[^>]*\btype\s*=\s*["']checkbox["'][^>]*?)\sreadonly(\s|>)/gi, '$1$2')
+  );
+}
+
+/** CKEditor keeps form state in the model; sync DOM checkbox toggles back into `setData` HTML. */
+function bindCheckboxClickSync(editor: {
+  getData: () => string;
+  setData: (html: string) => void;
+  ui?: { view?: { editable?: { element?: HTMLElement | null } } };
+}): () => void {
+  const editable = editor.ui?.view?.editable?.element ?? null;
+  if (!editable) return () => {};
+
+  const syncFromDom = () => {
+    const live = Array.from(editable.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    if (!live.length) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = editor.getData();
+    const inData = wrap.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    if (inData.length !== live.length) return;
+    for (let i = 0; i < live.length; i++) {
+      const want = live[i].checked;
+      const node = inData[i];
+      if (want) node.setAttribute('checked', 'checked');
+      else node.removeAttribute('checked');
+    }
+    editor.setData(wrap.innerHTML);
+  };
+
+  const onPointerDown = (ev: PointerEvent) => {
+    const path = ev.composedPath();
+    const input = path.find(
+      (n): n is HTMLInputElement =>
+        n instanceof HTMLInputElement &&
+        n.type === 'checkbox' &&
+        editable.contains(n)
+    );
+    if (!input) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const next = !input.checked;
+    input.checked = next;
+    if (next) input.setAttribute('checked', 'checked');
+    else input.removeAttribute('checked');
+    queueMicrotask(syncFromDom);
+  };
+
+  editable.addEventListener('pointerdown', onPointerDown, true);
+  return () => editable.removeEventListener('pointerdown', onPointerDown, true);
+}
+
 export default function MemoEditor({
   value,
   onChange,
@@ -54,7 +114,7 @@ export default function MemoEditor({
   letterheadStateOfficeName,
   letterheadZones,
 }: MemoEditorProps) {
-  const initialData = value || INITIAL_CONTENT;
+  const initialData = normalizeEditorHtml(value || INITIAL_CONTENT);
 
   return (
     <div className="border rounded-lg bg-white shadow-sm">
@@ -77,7 +137,10 @@ export default function MemoEditor({
               List,
               Indent, IndentBlock,
               Alignment,
-              Table, TableToolbar,
+              Table,
+              TableToolbar,
+              TableColumnResize,
+              GeneralHtmlSupport,
               Link,
               Undo,
             ],
@@ -90,8 +153,32 @@ export default function MemoEditor({
               'insertTable', 'link',
             ],
             licenseKey: 'GPL',
-          table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
+            table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
+            htmlSupport: {
+              allow: [
+                {
+                  name: 'input',
+                  attributes: [
+                    'type',
+                    'checked',
+                    'disabled',
+                    'readonly',
+                    'value',
+                    'name',
+                    'id',
+                    'class',
+                    'style',
+                    'aria-checked',
+                    'data-*',
+                  ],
+                  classes: true,
+                  styles: true,
+                },
+                { name: 'label', attributes: ['for', 'class', 'style'], classes: true, styles: true },
+              ],
+            },
           }}
+          onReady={(editor) => bindCheckboxClickSync(editor)}
           onChange={(_event, editor) => onChange(editor.getData())}
         />
       </div>

@@ -52,6 +52,7 @@ import {
 } from '@/components/template-builder/constants';
 import { cn } from '@/utils/cn';
 import { documentsApi } from '@/api/documents';
+import { workflowApi } from '@/api/workflow';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
 import type { DocumentTemplateStatus } from '@/types/documentTemplate';
@@ -62,6 +63,7 @@ import {
 } from '@/utils/documentTemplatePayload';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { formatDateTime } from '@/utils/formatters';
+import type { WorkflowTemplateSummary } from '@/types/workflow';
 
 function findDocTypeLabel(value: string): string {
   for (const g of TEMPLATE_DOCUMENT_GROUPS) {
@@ -104,6 +106,7 @@ export default function CreateDocumentTemplatePage() {
   const [description, setDescription] = useState('');
   const [version, setVersion] = useState('1.0.0');
   const [docType, setDocType] = useState('internal_memo');
+  const [workflowTemplateId, setWorkflowTemplateId] = useState('');
   const [scopeLevel, setScopeLevel] = useState('all');
   const [hq, setHq] = useState('');
   const [stateOffice, setStateOffice] = useState(ORG_SCOPE_ALL);
@@ -155,6 +158,10 @@ export default function CreateDocumentTemplatePage() {
     queryKey: QUERY_KEYS.orgScopeReference,
     queryFn: () => documentsApi.getOrgScopeReference(),
     staleTime: 60 * 60 * 1000,
+  });
+  const { data: workflowTemplates } = useQuery({
+    queryKey: [QUERY_KEYS.workflowTemplates],
+    queryFn: () => workflowApi.getTemplates(),
   });
 
   const scopeLockedToAll = scopeLevel === ORG_SCOPE_ALL;
@@ -248,6 +255,7 @@ export default function CreateDocumentTemplatePage() {
       version,
       description,
       docType,
+      workflowTemplateId,
       scopeLevel,
       hq,
       stateOffice,
@@ -286,6 +294,7 @@ export default function CreateDocumentTemplatePage() {
     setVersion(f.version);
     setDescription(f.description);
     setDocType(f.docType);
+    setWorkflowTemplateId(f.workflowTemplateId);
     setScopeLevel(f.scopeLevel);
     setHq(f.hq);
     setStateOffice(f.stateOffice);
@@ -531,6 +540,25 @@ export default function CreateDocumentTemplatePage() {
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <TemplateDocumentTypeSelect value={docType} onValueChange={setDocType} id="doc-type" />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Assigned workflow</Label>
+                <Select value={workflowTemplateId || '__none__'} onValueChange={(v) => setWorkflowTemplateId(v === '__none__' ? '' : v)}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Select workflow template (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {workflowTemplates?.map((wf: WorkflowTemplateSummary) => (
+                      <SelectItem key={wf.id} value={wf.id}>
+                        {wf.name} ({wf.steps.length} step{wf.steps.length !== 1 ? 's' : ''})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Linked workflow is used as default routing when documents are created from this template.
+                </p>
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="tpl-desc">Description</Label>

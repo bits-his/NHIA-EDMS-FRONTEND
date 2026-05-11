@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,9 +17,14 @@ import { Skeleton } from '@/components/shared/Skeleton';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import MemoEditor from '@/components/documents/MemoEditor';
 import { documentsApi } from '@/api/documents';
+import { tasksApi } from '@/api/tasks';
+import { workflowApi } from '@/api/workflow';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
+import { getDocumentActions } from '@/utils/permissions';
+import { useAuthStore } from '@/stores/authStore';
 import { isUuid } from '@/utils/uuid';
+import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
 
 const editSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500, 'Max 500 characters'),
@@ -30,6 +36,7 @@ export default function EditDocumentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
 
   const documentIdValid = !!id && isUuid(id);
 
@@ -38,6 +45,47 @@ export default function EditDocumentPage() {
     queryFn: () => documentsApi.getById(id!),
     enabled: documentIdValid,
   });
+
+  const { data: myTasks } = useQuery({
+    queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
+    queryFn: () => tasksApi.list(user!.user_id),
+    enabled: !!user?.user_id && document?.status === 'pending',
+  });
+
+  const { data: wfInstance } = useQuery({
+    queryKey: QUERY_KEYS.workflowInstanceByDocument(id!),
+    queryFn: () => workflowApi.getInstanceByDocumentId(id!),
+    enabled: documentIdValid && document?.status === 'pending',
+  });
+
+  const { data: wfTemplate } = useQuery({
+    queryKey: QUERY_KEYS.workflowTemplate(wfInstance?.template_id ?? ''),
+    queryFn: () => workflowApi.getTemplateById(wfInstance!.template_id),
+    enabled: !!wfInstance?.template_id,
+  });
+
+  const pendingStageLabel = useMemo(
+    () =>
+      document?.status === 'pending'
+        ? getPendingDocumentWorkflowStageLabel(wfInstance ?? undefined, wfTemplate ?? undefined)
+        : null,
+    [document?.status, wfInstance, wfTemplate]
+  );
+
+  const hasActiveWorkflowTaskForDoc = useMemo(
+    () => hasActiveTaskOnCurrentWorkflowStep(myTasks, document?.id ?? '', wfInstance),
+    [myTasks, document?.id, wfInstance]
+  );
+
+  const editActions = useMemo(() => {
+    if (!document) return null;
+    return getDocumentActions(document.status, user?.roles ?? [], {
+      permissions: user?.permissions ?? [],
+      userId: user?.user_id,
+      ownerId: document.owner_id,
+      hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+    });
+  }, [document, user, hasActiveWorkflowTaskForDoc]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors, isDirty } } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
@@ -89,7 +137,7 @@ export default function EditDocumentPage() {
     );
   }
 
-  if (document && document.status !== 'draft') {
+  if (document && !editActions?.canEdit) {
     return (
       <div className="space-y-4 max-w-2xl">
         <Button variant="ghost" size="sm" onClick={() => navigate(`/documents/${id}`)}>
@@ -98,7 +146,9 @@ export default function EditDocumentPage() {
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            This document is in <strong>{document.status}</strong> status and cannot be edited. Only draft documents can be modified.
+            This document is in <strong>{document.status}</strong> status and cannot be edited with your current
+            access. Draft memos can be edited by the owner (or authorised roles). Pending memos can be edited only when
+            you have an active workflow task for the current step on this document.
           </AlertDescription>
         </Alert>
       </div>
@@ -116,7 +166,9 @@ export default function EditDocumentPage() {
           <h1 className="text-xl font-bold tracking-tight">Edit Document</h1>
           <p className="text-sm text-muted-foreground mt-1">Modify the document title and content</p>
         </div>
-        {document && <DocumentStatusBadge status={document.status} />}
+        {document && (
+          <DocumentStatusBadge status={document.status} pendingStageLabel={pendingStageLabel} />
+        )}
       </div>
 
       {isLoading ? (

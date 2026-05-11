@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { auditClient } from './client';
 import type { AuditLog, CreateAuditLogRequest, AuditLogsQuery } from '@/types/audit';
 
@@ -26,5 +27,30 @@ export const auditApi = {
 
     const res = await auditClient.get<AuditLog[]>('/audit/logs', { params });
     return res.data;
+  },
+
+  /**
+   * Full timeline for a document: rows where entity is the document, its workflow instance(s),
+   * or tasks on those instances (same ordering as backend: oldest first).
+   */
+  getLogsForDocument: async (documentId: string): Promise<AuditLog[]> => {
+    const res = await auditClient.get<AuditLog[]>(`/audit/logs/for-document/${documentId}`);
+    return res.data;
+  },
+
+  /**
+   * Newest-first feed (limit 1–200). Requires `view_audit_logs` or admin — returns [] on 403.
+   */
+  getRecentLogs: async (limit = 80): Promise<AuditLog[]> => {
+    const n = Math.min(Math.max(Math.floor(limit) || 80, 1), 200);
+    try {
+      const res = await auditClient.get<AuditLog[]>('/audit/logs/recent', {
+        params: { limit: String(n) },
+      });
+      return res.data;
+    } catch (e) {
+      if (axios.isAxiosError(e) && e.response?.status === 403) return [];
+      throw e;
+    }
   },
 };

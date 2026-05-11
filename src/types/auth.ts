@@ -35,6 +35,23 @@ export interface AuthUser {
   permissions: string[];
 }
 
+/** GET /auth/users/:id/profile — extended fields from auth agent */
+export interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  full_name?: string | null;
+  phone?: string | null;
+  zone?: string | null;
+  state?: string | null;
+  department?: string | null;
+  unit?: string | null;
+  rank?: string | null;
+  photo_path?: string | null;
+  signature_path?: string | null;
+  created_at: string;
+}
+
 /** Legacy shortcuts still accepted by some checks */
 export type LegacyPermission = 'read' | 'write' | 'delete' | 'approve' | 'reject';
 

@@ -95,10 +95,37 @@ export const documentsApi = {
     return res.data;
   },
 
+  /** Save e-signature image for the signed-in user (PNG/JPEG/WebP/GIF, max ~1 MB). */
+  uploadProfileSignature: async (file: File): Promise<{ signature_path: string | null; message: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await documentClient.post<{ signature_path: string | null; message: string }>(
+      '/documents/profile/signature',
+      form
+    );
+    return res.data;
+  },
+
+  /** Stream current user's saved signature file (for Settings preview). */
+  getMySignatureBlob: async (): Promise<Blob> => {
+    const res = await documentClient.get<Blob>('/documents/profile/signature', {
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+
   /** Fetch preview HTML (authenticated). Caller should open via blob URL. */
   getPreviewHtml: async (documentId: string): Promise<string> => {
     const res = await documentClient.get<string>(`/documents/${documentId}/preview`, {
       responseType: 'text',
+    });
+    return res.data;
+  },
+
+  /** Signatory signature image for a document (after final approval). 404 if none. */
+  getDocumentSignatorySignatureBlob: async (documentId: string): Promise<Blob> => {
+    const res = await documentClient.get<Blob>(`/documents/${documentId}/signatory-signature`, {
+      responseType: 'blob',
     });
     return res.data;
   },

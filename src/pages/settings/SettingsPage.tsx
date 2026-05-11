@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/shared/PageHeader';
+import { ProfileSignatureSection } from '@/components/settings/ProfileSignatureSection';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/providers/ThemeProvider';
 import { authApi } from '@/api/auth';
@@ -114,6 +115,8 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {user?.user_id && <ProfileSignatureSection userId={user.user_id} />}
 
       {/* Roles & Permissions detail */}
       <Card>

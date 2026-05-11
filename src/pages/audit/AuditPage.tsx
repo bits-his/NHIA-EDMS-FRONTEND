@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Shield, Search, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -20,7 +24,8 @@ import { cn } from '@/utils/cn';
 
 type QueryMode = 'actor' | 'entity';
 
-// Build the known-users list for the picker
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const KNOWN_USER_OPTIONS = SEEDED_USER_IDS.map((id) => ({
   id,
   name: KNOWN_USERS[id] ?? id.slice(0, 8) + '…',
@@ -28,54 +33,88 @@ const KNOWN_USER_OPTIONS = SEEDED_USER_IDS.map((id) => ({
 
 export default function AuditPage() {
   const user = useAuthStore((s) => s.user);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const hasRole = useAuthStore((s) => s.hasRole);
+  const canViewRecent = hasPermission('view_audit_logs') || hasRole('admin');
+
   const [mode, setMode] = useState<QueryMode>('actor');
-
-  // Actor mode — store the UUID internally, show username in UI
   const [actorId, setActorId] = useState(user?.user_id ?? '');
-
-  // Entity mode
   const [entityType, setEntityType] = useState('document');
   const [entityId, setEntityId] = useState('');
-
   const [submitted, setSubmitted] = useState(false);
 
-  const query = mode === 'actor'
-    ? { actor_id: actorId }
-    : { entity_type: entityType, entity_id: entityId };
+  const trimmedEntityId = entityId.trim();
+  const trimmedActorId = actorId.trim();
+  const entityIdValid = UUID_RE.test(trimmedEntityId);
+  const actorIdValid = UUID_RE.test(trimmedActorId);
 
-  const { data: logs, isLoading, error, refetch } = useQuery({
-    queryKey: QUERY_KEYS.auditLogs(query),
-    queryFn: () => auditApi.getLogs(query),
-    enabled: submitted && (mode === 'actor' ? !!actorId : !!(entityType && entityId)),
+  const searchQuery = useMemo(() => {
+    if (mode === 'actor') return { actor_id: trimmedActorId };
+    return { entity_type: entityType, entity_id: trimmedEntityId };
+  }, [mode, entityType, trimmedActorId, trimmedEntityId]);
+
+  const searchEnabled =
+    submitted &&
+    (mode === 'actor' ? actorIdValid : !!(entityType && entityIdValid));
+
+  const { data: recentLogs, isLoading: recentLoading } = useQuery({
+    queryKey: QUERY_KEYS.auditLogsRecent(80),
+    queryFn: () => auditApi.getRecentLogs(80),
+    enabled: canViewRecent,
+    staleTime: 30_000,
   });
 
-  const handleSearch = () => { setSubmitted(true); refetch(); };
+  const { data: logs, isLoading, error, refetch } = useQuery({
+    queryKey: QUERY_KEYS.auditLogs(searchQuery),
+    queryFn: () => auditApi.getLogs(searchQuery),
+    enabled: searchEnabled,
+  });
 
-  // Display name for the currently selected actor
-  const selectedActorName = KNOWN_USERS[actorId] ?? (actorId ? actorId.slice(0, 8) + '…' : '');
+  const handleSearch = () => {
+    setSubmitted(true);
+  };
+
+  const selectedActorName = KNOWN_USERS[trimmedActorId] ?? (trimmedActorId ? trimmedActorId.slice(0, 8) + '…' : '');
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Audit Log"
-        description="Immutable, append-only record of all system actions and events"
+        description="Immutable, append-only record of significant actions (documents, workflows, and more)"
       />
 
-      {/* Query builder */}
+      {canViewRecent && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Shield className="h-4 w-4" /> Recent system activity
+            </CardTitle>
+            <p className="text-xs text-muted-foreground font-normal">
+              Newest first · up to 80 events across all users and entities
+            </p>
+          </CardHeader>
+          <CardContent>
+            <AuditTimeline logs={recentLogs ?? []} loading={recentLoading} compact />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4" /> Query Audit Logs
+            <SlidersHorizontal className="h-4 w-4" /> Search audit logs
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-
-          {/* Mode toggle */}
           <div className="flex items-center gap-1 p-1 bg-muted rounded-lg w-fit">
             {(['actor', 'entity'] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setSubmitted(false); }}
+                type="button"
+                onClick={() => {
+                  setMode(m);
+                  setSubmitted(false);
+                }}
                 className={cn(
                   'px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize',
                   mode === m
@@ -88,28 +127,33 @@ export default function AuditPage() {
             ))}
           </div>
 
-          {/* ── Actor mode ── */}
           {mode === 'actor' ? (
             <div className="space-y-3">
-              <Label>Select User</Label>
-
-              {/* User picker — shows names, stores UUIDs */}
+              <Label>Select user</Label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {KNOWN_USER_OPTIONS.map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => { setActorId(u.id); setSubmitted(false); }}
+                    type="button"
+                    onClick={() => {
+                      setActorId(u.id);
+                      setSubmitted(false);
+                    }}
                     className={cn(
                       'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all text-left',
-                      actorId === u.id
+                      trimmedActorId === u.id
                         ? 'border-primary bg-primary/8 text-primary'
                         : 'border-border hover:border-primary/30 hover:bg-muted/40 text-foreground'
                     )}
                   >
-                    <div className={cn(
-                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold uppercase',
-                      actorId === u.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    )}>
+                    <div
+                      className={cn(
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold uppercase',
+                        trimmedActorId === u.id
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground'
+                      )}
+                    >
                       {u.name.slice(0, 2)}
                     </div>
                     <span className="capitalize">{u.name}</span>
@@ -120,7 +164,6 @@ export default function AuditPage() {
                 ))}
               </div>
 
-              {/* Also allow pasting a custom UUID for users not in the seed */}
               <details className="group">
                 <summary className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors list-none">
                   <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform" />
@@ -130,36 +173,39 @@ export default function AuditPage() {
                   <Input
                     placeholder="Paste user UUID…"
                     value={actorId}
-                    onChange={(e) => { setActorId(e.target.value); setSubmitted(false); }}
+                    onChange={(e) => {
+                      setActorId(e.target.value);
+                      setSubmitted(false);
+                    }}
                     className="font-mono text-xs flex-1"
                   />
                 </div>
               </details>
 
-              <Button
-                onClick={handleSearch}
-                disabled={!actorId}
-                className="w-full sm:w-auto"
-              >
+              <Button onClick={handleSearch} disabled={!trimmedActorId} className="w-full sm:w-auto">
                 <Search className="h-4 w-4" />
                 Search logs for {selectedActorName || 'selected user'}
               </Button>
+              {submitted && mode === 'actor' && !actorIdValid && (
+                <p className="text-xs text-destructive">Enter a valid user UUID to search.</p>
+              )}
             </div>
-
           ) : (
-            /* ── Entity mode ── */
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Find all audit events for a specific document or task by pasting its ID.
+                Find audit events linked to a specific document, task, workflow instance, or user record.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>Entity Type</Label>
+                  <Label>Entity type</Label>
                   <Select value={entityType} onValueChange={setEntityType}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="document">Document</SelectItem>
                       <SelectItem value="task">Task</SelectItem>
+                      <SelectItem value="workflow_instance">Workflow instance</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                     </SelectContent>
                   </Select>
@@ -169,48 +215,62 @@ export default function AuditPage() {
                   <Input
                     placeholder={`Paste ${entityType} UUID…`}
                     value={entityId}
-                    onChange={(e) => { setEntityId(e.target.value); setSubmitted(false); }}
+                    onChange={(e) => {
+                      setEntityId(e.target.value);
+                      setSubmitted(false);
+                    }}
                     className="font-mono text-xs"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Tip: copy the ID from the {entityType} detail page
+                    Tip: copy the ID from the relevant detail page
                   </p>
                 </div>
               </div>
               <Button
                 onClick={handleSearch}
-                disabled={!entityType || !entityId}
+                disabled={!entityType || !trimmedEntityId}
                 className="w-full sm:w-auto"
               >
                 <Search className="h-4 w-4" /> Search
               </Button>
+              {submitted && mode === 'entity' && trimmedEntityId && !entityIdValid && (
+                <p className="text-xs text-destructive">Enter a valid UUID for the entity ID.</p>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Results */}
-      {!submitted ? (
-        <div className="flex flex-col items-center py-16 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted border border-border mb-4">
-            <Shield className="h-7 w-7 text-muted-foreground" strokeWidth={1.5} />
-          </div>
-          <p className="text-sm font-medium text-foreground">Query the audit log</p>
-          <p className="text-xs text-muted-foreground mt-1.5 max-w-xs leading-relaxed">
-            Select a user to see their activity, or search by entity to trace a specific document or task
+      {!canViewRecent && !submitted && (
+        <div className="flex flex-col items-center py-12 text-center border border-dashed border-border rounded-xl bg-muted/20">
+          <Shield className="h-8 w-8 text-muted-foreground mb-2" strokeWidth={1.5} />
+          <p className="text-sm font-medium text-foreground">Run a search</p>
+          <p className="text-xs text-muted-foreground mt-1.5 max-w-sm leading-relaxed px-4">
+            The live system-wide feed requires the <strong>view audit logs</strong> permission (or admin). You can
+            still search by <strong>your user ID</strong> or by <strong>document / task / workflow UUID</strong>{' '}
+            above.
           </p>
         </div>
-      ) : error ? (
-        <ErrorState error={error} onRetry={refetch} />
-      ) : (
+      )}
+
+      {submitted && !searchEnabled && (
+        <div className="flex flex-col items-center py-10 text-center text-muted-foreground text-sm">
+          Fix the fields above, then search again.
+        </div>
+      )}
+
+      {submitted && searchEnabled && error && (
+        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load audit results" />
+      )}
+
+      {submitted && searchEnabled && !error && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base">
                 {mode === 'actor'
                   ? `Activity for ${selectedActorName}`
-                  : `${entityType} audit trail`
-                }
+                  : `${entityType} audit trail`}
                 {logs ? ` (${logs.length} entries)` : ''}
               </CardTitle>
               {logs && logs.length > 0 && (
@@ -223,7 +283,7 @@ export default function AuditPage() {
               <EmptyState
                 icon={Shield}
                 title="No audit entries found"
-                description="No audit logs match your query"
+                description="No audit logs match this query."
               />
             ) : (
               <AuditTimeline logs={logs ?? []} loading={isLoading} />

@@ -1,5 +1,16 @@
 import type { DocumentStatus } from '@/types/document';
 
+export type DocumentActionContext = {
+  /** JWT permission names (e.g. `submit_document`, `edit_document`) */
+  permissions?: string[];
+  /** Current user id — matched to document `owner_id` for draft edit/submit */
+  userId?: string | null;
+  /** Document `owner_id` */
+  ownerId?: string | null;
+  /** True when the user has a pending/in_progress task on this document for the workflow instance's current step. */
+  hasActiveWorkflowTask?: boolean;
+};
+
 /**
  * Determines which document actions are available based on current status and user roles.
  * Aligns with document agent routes: final-approve (signatory gate on server), reject (comment),
@@ -7,7 +18,8 @@ import type { DocumentStatus } from '@/types/document';
  */
 export function getDocumentActions(
   status: DocumentStatus,
-  roles: string[]
+  roles: string[],
+  context: DocumentActionContext = {}
 ): {
   canEdit: boolean;
   canSubmit: boolean;
@@ -18,23 +30,37 @@ export function getDocumentActions(
   canApproveForward: boolean;
   canRequestInfo: boolean;
 } {
+  const permissions = context.permissions ?? [];
   const isAdmin = roles.includes('admin');
   const isReviewer = roles.includes('reviewer');
   const isSubmitter = roles.includes('submitter');
   const isDirector = roles.includes('director');
-  const reviewerLike = isAdmin || isReviewer || isDirector;
+
+  const uid = context.userId?.trim();
+  const oid = context.ownerId?.trim();
+  const isDraftOwner = Boolean(uid && oid && uid === oid);
+
+  const canEditDraftBody =
+    isAdmin || isSubmitter || isDraftOwner || permissions.includes('edit_document');
+  const canSubmitDraft =
+    isAdmin || isSubmitter || isDraftOwner || permissions.includes('submit_document');
+
+  const hasActiveWorkflowTask = context.hasActiveWorkflowTask === true;
+  /** Pending memo: only the assignee for the current workflow step may act (matches server task gate). */
+  const pendingMyStep = status === 'pending' && hasActiveWorkflowTask;
+  const canEditPendingMemo = pendingMyStep;
 
   return {
-    canEdit: status === 'draft' && (isAdmin || isSubmitter),
-    canSubmit: status === 'draft' && (isAdmin || isSubmitter),
-    canFinalApprove: status === 'pending' && reviewerLike,
-    canReject: status === 'pending' && reviewerLike,
+    canEdit: (status === 'draft' && canEditDraftBody) || canEditPendingMemo,
+    canSubmit: status === 'draft' && canSubmitDraft,
+    canFinalApprove: pendingMyStep,
+    canReject: pendingMyStep,
     canArchive: status === 'approved' && isAdmin,
     canEditForward:
-      (status === 'draft' || status === 'pending') &&
-      (isAdmin || isSubmitter || isReviewer || isDirector),
-    canApproveForward: status === 'pending' && reviewerLike,
-    canRequestInfo: status === 'pending' && reviewerLike,
+      (status === 'draft' && (isAdmin || isSubmitter || isReviewer || isDirector)) ||
+      pendingMyStep,
+    canApproveForward: pendingMyStep,
+    canRequestInfo: pendingMyStep,
   };
 }
 

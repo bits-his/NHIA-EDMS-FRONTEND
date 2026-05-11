@@ -2,6 +2,8 @@
 export type DocumentTemplateStatus = 'draft' | 'published' | 'archived';
 
 export interface DocumentTemplateMetadata {
+  /** Linked workflow template used during document submission */
+  workflow_template_id?: string;
   template_code?: string;
   version_label?: string;
   description?: string;

@@ -13,12 +13,14 @@ interface AuditTimelineProps {
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  'document.create':    'bg-primary/10 text-primary border-primary/20',
+  'document.create': 'bg-primary/10 text-primary border-primary/20',
   'document.submitted': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
-  'document.approve':   'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
-  'document.reject':    'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
-  'workflow.advanced':  'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
-  'workflow.started':   'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800',
+  'document.approve': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
+  'document.reject': 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
+  'document.final_approve': 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-900/25 dark:text-emerald-300',
+  'workflow.advanced': 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
+  'workflow.started': 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800',
+  'workflow.resumed': 'bg-cyan-50 text-cyan-800 border-cyan-200 dark:bg-cyan-900/20 dark:text-cyan-300 dark:border-cyan-800',
 };
 
 function AuditEntry({ log, compact }: { log: AuditLog; compact?: boolean }) {
