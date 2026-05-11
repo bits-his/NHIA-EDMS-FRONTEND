@@ -1,8 +1,9 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText, Layers, CheckSquare, Shield, Plus, Search,
-  ArrowRight, Bell, TrendingUp, Clock, AlertTriangle, Activity,
+  ArrowRight, Bell, TrendingUp, Clock, AlertTriangle, Activity, Users,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,18 +19,18 @@ import { useNotificationStore } from '@/stores/notificationStore';
 import { auditApi } from '@/api/audit';
 import { tasksApi } from '@/api/tasks';
 import { documentsApi } from '@/api/documents';
-import { QUERY_KEYS, SEEDED_USER_IDS, SEEDED_DOCUMENT_IDS } from '@/utils/constants';
+import { authApi } from '@/api/auth';
+import { QUERY_KEYS } from '@/utils/constants';
 import { formatRelative, isOverdue } from '@/utils/formatters';
-import { canCreateDocument } from '@/utils/permissions';
-import { resolveUsername } from '@/utils/users';
+import { canCreateDocument, canViewOperationalOverview, canAccessTemplateManagement } from '@/utils/permissions';
+import { resolveUsername, registerUsers } from '@/utils/users';
 import { cn } from '@/utils/cn';
-import type { Document } from '@/types/document';
 import type { Task } from '@/types/task';
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.roles.includes('admin') ?? false;
-  return isAdmin ? <AdminDashboard /> : <UserDashboard />;
+  const operational = canViewOperationalOverview(user?.roles ?? [], user?.permissions ?? []);
+  return operational ? <Operational360Dashboard /> : <UserDashboard />;
 }
 
 // ─── Shared components ────────────────────────────────────────────────────────
@@ -69,67 +70,85 @@ function QuickAction({ icon: Icon, label, path, navigate }: {
   );
 }
 
-// ─── Admin Dashboard ──────────────────────────────────────────────────────────
-function AdminDashboard() {
+// ─── 360 Operations (admin / director / reviewer / manage_* — matches document & task agent visibility) ──
+function Operational360Dashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
 
-  // Fetch all documents across all users
-  const allUserIds = [...new Set([user?.user_id ?? '', ...SEEDED_USER_IDS])];
+  const isAdmin = user?.roles.includes('admin') ?? false;
+  const canRecentAudit = isAdmin || hasPermission('view_audit_logs');
+
+  useQuery({
+    queryKey: ['dashboard-register-users'],
+    queryFn: async () => {
+      const rows = await authApi.listUsers();
+      registerUsers(rows.map((r) => ({ id: r.id, username: r.username })));
+      return rows;
+    },
+    enabled: isAdmin,
+    staleTime: 120_000,
+  });
+
+  const { data: profile } = useQuery({
+    queryKey: QUERY_KEYS.userProfile(user?.user_id ?? ''),
+    queryFn: () => authApi.getProfile(user!.user_id),
+    enabled: !!user?.user_id,
+    staleTime: 120_000,
+  });
 
   const { data: allDocuments, isLoading: docsLoading } = useQuery({
-    queryKey: [QUERY_KEYS.allDocuments, 'admin'],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        allUserIds.map((uid) => auditApi.getLogs({ actor_id: uid }))
-      );
-      const auditDocIds = results
-        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof auditApi.getLogs>>> => r.status === 'fulfilled')
-        .flatMap((r) => r.value)
-        .filter((l) => l.entity_type === 'document' && l.entity_id)
-        .map((l) => l.entity_id!);
-      const allIds = [...new Set([...SEEDED_DOCUMENT_IDS, ...auditDocIds])];
-      const docResults = await Promise.allSettled(allIds.map((id) => documentsApi.getById(id)));
-      return docResults
-        .filter((r): r is PromiseFulfilledResult<Document> => r.status === 'fulfilled')
-        .map((r) => r.value);
-    },
+    queryKey: [QUERY_KEYS.allDocuments, 'operational-360', user?.user_id ?? ''],
+    queryFn: () => documentsApi.listAll(),
     staleTime: 30_000,
+    enabled: !!user?.user_id,
   });
 
-  // Fetch tasks for all known users
   const { data: allTasksRaw, isLoading: tasksLoading } = useQuery({
-    queryKey: ['admin-all-tasks'],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        SEEDED_USER_IDS.map((uid) => tasksApi.list(uid))
-      );
-      return results
-        .filter((r): r is PromiseFulfilledResult<Task[]> => r.status === 'fulfilled')
-        .flatMap((r) => r.value);
-    },
+    queryKey: QUERY_KEYS.tasksOperationalAll(),
+    queryFn: () => tasksApi.listOperationalAll(),
     staleTime: 30_000,
+    enabled: !!user?.user_id,
   });
 
-  // Fetch recent audit across all users
-  const { data: allAudit, isLoading: auditLoading } = useQuery({
-    queryKey: ['admin-audit-all'],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        SEEDED_USER_IDS.map((uid) => auditApi.getLogs({ actor_id: uid }))
-      );
-      const logs = results
-        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof auditApi.getLogs>>> => r.status === 'fulfilled')
-        .flatMap((r) => r.value);
-      return logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    },
-    staleTime: 30_000,
+  const { data: recentAuditFeed, isLoading: auditLoadingRecent } = useQuery({
+    queryKey: QUERY_KEYS.auditLogsRecent(60),
+    queryFn: () => auditApi.getRecentLogs(60),
+    staleTime: 15_000,
+    enabled: !!user?.user_id && canRecentAudit,
   });
+
+  const { data: fallbackAudit, isLoading: auditLoadingFallback } = useQuery({
+    queryKey: ['audit-operational-fallback', user?.user_id ?? ''],
+    queryFn: () => auditApi.getLogs({ actor_id: user!.user_id }),
+    staleTime: 30_000,
+    enabled: !!user?.user_id && !canRecentAudit,
+  });
+
+  const auditLoading = canRecentAudit ? auditLoadingRecent : auditLoadingFallback;
+  const allAudit = canRecentAudit ? (recentAuditFeed ?? []) : (fallbackAudit ?? []);
 
   const docs = allDocuments ?? [];
   const tasks = allTasksRaw ?? [];
+
+  const assigneeWorkload = useMemo(() => {
+    const m = new Map<string, { total: number; active: number }>();
+    for (const t of tasks) {
+      const aid = t.assignee_id;
+      if (!aid) continue;
+      const cur = m.get(aid) ?? { total: 0, active: 0 };
+      cur.total += 1;
+      if (t.status === 'pending' || t.status === 'in_progress') cur.active += 1;
+      m.set(aid, cur);
+    }
+    return [...m.entries()].sort(
+      (a, b) => b[1].active - a[1].active || b[1].total - a[1].total
+    ).slice(0, 8);
+  }, [tasks]);
+
+  const orgHint = [profile?.zone, profile?.state, profile?.department].filter(Boolean).join(' · ');
 
   // Document stats
   const docsByStatus = {
@@ -153,8 +172,8 @@ function AdminDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Admin Dashboard"
-        description="System-wide overview — documents, tasks, and audit activity"
+        title="360 · Operations"
+        description={`Unified view of the document lifecycle, workflow tasks, and signals you are allowed to see — aligned with NHIA EDMS visibility rules.${orgHint ? ` Your profile context: ${orgHint}.` : ''}`}
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
@@ -211,12 +230,12 @@ function AdminDashboard() {
           ))
         ) : (
           <>
-            <StatCard icon={FileText} label="Total Documents" value={docs.length} sub="across all users"
+            <StatCard icon={FileText} label="Total Documents" value={docs.length} sub="within your visibility"
               color="text-primary" bg="bg-primary/10" ring="ring-primary/10" onClick={() => navigate('/documents')} />
             <StatCard icon={Clock} label="Pending Review" value={docsByStatus.pending} sub="awaiting approval"
               color="text-amber-600 dark:text-amber-400" bg="bg-amber-50 dark:bg-amber-900/20" ring="ring-amber-100 dark:ring-amber-900/30"
               onClick={() => navigate('/documents')} />
-            <StatCard icon={CheckSquare} label="Active Tasks" value={activeTasks.length} sub="system-wide"
+            <StatCard icon={CheckSquare} label="Active Tasks" value={activeTasks.length} sub="org-wide queue"
               color="text-blue-600 dark:text-blue-400" bg="bg-blue-50 dark:bg-blue-900/20" ring="ring-blue-100 dark:ring-blue-900/30"
               onClick={() => navigate('/tasks')} />
             <StatCard icon={AlertTriangle} label="Overdue Tasks" value={overdueTasks.length} sub="need attention"
@@ -308,52 +327,62 @@ function AdminDashboard() {
 
         {/* Right column */}
         <div className="space-y-5">
-          {/* User activity */}
+          {/* Assignee workload (derived from live task queue) */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-4 w-4 text-primary" /> Users
+                <Users className="h-4 w-4 text-primary" /> Assignee workload
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {SEEDED_USER_IDS.map((uid) => {
-                const name = resolveUsername(uid);
-                const userTasks = tasks.filter((t) => t.assignee_id === uid);
-                const activeCnt = userTasks.filter((t) => t.status === 'pending' || t.status === 'in_progress').length;
-                return (
-                  <div key={uid} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold uppercase">
-                        {name.slice(0, 2)}
+              {assigneeWorkload.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">No assignee data yet — tasks will appear as workflows run.</p>
+              ) : (
+                assigneeWorkload.map(([uid, { active: activeCnt, total }]) => {
+                  const name = resolveUsername(uid);
+                  return (
+                    <div key={uid} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold uppercase">
+                          {name.slice(0, 2)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium capitalize truncate">{name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {activeCnt} active · {total} total
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium capitalize">{name}</p>
-                        <p className="text-xs text-muted-foreground">{activeCnt} active task{activeCnt !== 1 ? 's' : ''}</p>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/tasks')}
+                        className="text-xs text-primary hover:underline shrink-0"
+                      >
+                        Tasks
+                      </button>
                     </div>
-                    <button
-                      onClick={() => navigate('/audit')}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      View logs
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </CardContent>
           </Card>
 
           {/* Quick actions */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Admin Actions</CardTitle>
+              <CardTitle className="text-base">Shortcuts</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1">
               <QuickAction icon={Plus}      label="Create Document"  path="/documents/new" navigate={navigate} />
               <QuickAction icon={FileText}  label="All Documents"    path="/documents"     navigate={navigate} />
-              <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
+              {canAccessTemplateManagement(user?.roles ?? []) && (
+                <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
+              )}
               <QuickAction icon={Shield}    label="Audit Log"        path="/audit"         navigate={navigate} />
               <QuickAction icon={Search}    label="Search & OCR"     path="/search"        navigate={navigate} />
+              {isAdmin && (
+                <QuickAction icon={Users} label="User management" path="/admin/users" navigate={navigate} />
+              )}
             </CardContent>
           </Card>
         </div>
@@ -363,7 +392,7 @@ function AdminDashboard() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            <CheckSquare className="h-4 w-4 text-primary" /> All Active Tasks
+            <CheckSquare className="h-4 w-4 text-primary" /> Active tasks (org-wide)
             {activeTasks.length > 0 && (
               <Badge variant="info" className="ml-1">{activeTasks.length}</Badge>
             )}
@@ -422,7 +451,8 @@ function AdminDashboard() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" /> System Activity
+            <Activity className="h-4 w-4 text-primary" />
+            {canRecentAudit ? 'System activity' : 'Your recent audit'}
           </CardTitle>
           <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
             Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />

@@ -68,6 +68,8 @@ export const QUERY_KEYS = {
   document: (id: string) => ['document', id],
   documentVersions: (id: string) => ['document-versions', id],
   tasks: (assigneeId: string) => ['tasks', assigneeId],
+  /** All workflow tasks (requires director/reviewer/admin on task agent). */
+  tasksOperationalAll: () => ['tasks', 'operational', 'all'] as const,
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
   auditLogsForDocument: (documentId: string) => ['audit-logs', 'for-document', documentId] as const,

@@ -14,6 +14,12 @@ export const tasksApi = {
     return res.data;
   },
 
+  /** Org-wide task queue (admin, director, reviewer, or manage_* per task agent). */
+  listOperationalAll: async (): Promise<Task[]> => {
+    const res = await taskClient.get<Task[]>('/tasks', { params: { scope: 'all' } });
+    return res.data;
+  },
+
   getById: async (id: string): Promise<Task> => {
     const res = await taskClient.get<Task>(`/tasks/${id}`);
     return res.data;

@@ -71,6 +71,15 @@ export function canCreateDocument(roles: string[], permissions: string[] = []): 
   return permissions.includes('write');
 }
 
+/**
+ * Cross-user operational dashboard (matches document agent `canViewAllDocuments` /
+ * task agent `canViewAllTasks`): org-wide document and task visibility for oversight roles.
+ */
+export function canViewOperationalOverview(roles: string[], permissions: string[] = []): boolean {
+  if (roles.some((r) => ['admin', 'director', 'reviewer'].includes(r))) return true;
+  return permissions.includes('manage_documents') || permissions.includes('manage_users');
+}
+
 export function canViewAuditLogs(_roles: string[]): boolean {
   return true;
 }
