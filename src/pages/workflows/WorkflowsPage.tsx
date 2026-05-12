@@ -28,6 +28,7 @@ import { WorkflowEditorDialog } from '@/components/workflows/WorkflowEditorDialo
 import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDate } from '@/utils/formatters';
+import { workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
 
 type ViewMode = 'grid' | 'list';
 
@@ -221,7 +222,7 @@ export default function WorkflowsPage() {
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Users className="h-3 w-3" />
-                            <span className="capitalize">{step.assignee_role}</span>
+                            <span>{workflowAssigneeRoleLabel(step.assignee_role)}</span>
                             {step.action_type && (
                               <>
                                 <ArrowRight className="h-3 w-3" />

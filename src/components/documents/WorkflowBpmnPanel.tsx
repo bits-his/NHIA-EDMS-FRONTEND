@@ -5,6 +5,7 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { formatDateTime, formatRelative } from '@/utils/formatters';
+import { workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
 import type { DocumentStatus } from '@/types/document';
 import { WorkflowFlowchartView } from '@/components/workflows/WorkflowFlowchartView';
 
@@ -120,7 +121,7 @@ export function WorkflowBpmnPanel({ documentId, documentStatus }: WorkflowBpmnPa
                   </span>
                   <span className="text-muted-foreground capitalize ml-2">{s.status}</span>
                   {s.assignee_role && (
-                    <span className="text-muted-foreground ml-2 capitalize">{s.assignee_role.replace(/_/g, ' ')}</span>
+                    <span className="text-muted-foreground ml-2">{workflowAssigneeRoleLabel(s.assignee_role)}</span>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">

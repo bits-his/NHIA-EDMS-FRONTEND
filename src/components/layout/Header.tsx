@@ -16,6 +16,7 @@ import { useTheme } from '@/providers/ThemeProvider';
 import { cn } from '@/utils/cn';
 
 import { resolveUsername } from '@/utils/users';
+import { formatAuthRolesForDisplay, workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
 
 // Map route paths to human-readable breadcrumb labels
 const ROUTE_LABELS: Record<string, string> = {
@@ -83,7 +84,7 @@ export function Header() {
     navigate('/login');
   };
 
-  const roleLabel = user?.roles[0] ?? 'User';
+  const roleLabel = user?.roles[0] ? workflowAssigneeRoleLabel(user.roles[0]) : 'User';
   const displayName = user?.username ?? roleLabel;
   const initials = displayName.slice(0, 2).toUpperCase();
 
@@ -147,7 +148,7 @@ export function Header() {
             <DropdownMenuLabel>
               <div className="space-y-0.5">
                 <p className="text-sm font-semibold">{user?.username ?? 'User'}</p>
-                <p className="text-xs text-muted-foreground capitalize">{user?.roles.join(', ')}</p>
+                <p className="text-xs text-muted-foreground">{user?.roles?.length ? formatAuthRolesForDisplay(user.roles) : '—'}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

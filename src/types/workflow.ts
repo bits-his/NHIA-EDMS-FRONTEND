@@ -31,7 +31,11 @@ export interface BpmnWorkflowElement {
   title: string;
   step_number?: number;
   assignee_role?: string;
+  /** Human title for assignee_role (e.g. Director); from BPMN view API when available. */
+  assignee_role_label?: string;
   action_type?: string;
+  routing_scope?: string | null;
+  assignee_user_id?: string | null;
   phase?: string;
   badge?: BpmnSemanticBadge;
   decision_branches?: Array<{
@@ -118,6 +122,22 @@ export interface WorkflowStepDefinition {
   name: string;
   assignee_role: string;
   action_type: string;
+  /** When set, task is assigned to this user regardless of role resolution. */
+  assignee_user_id?: string | null;
+  /**
+   * Restrict role-based resolution to users in the same org slice as the document owner (submitter).
+   * Matches backend `routing_scope` / graph `assignee_scope`.
+   */
+  routing_scope?:
+    | 'unit'
+    | 'department'
+    | 'directorate'
+    | 'state_office'
+    | 'zone'
+    | 'hq'
+    | 'executive'
+    | 'inter_agency'
+    | null;
 }
 
 export interface CreateWorkflowTemplatePayload {

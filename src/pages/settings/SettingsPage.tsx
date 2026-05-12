@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/providers/ThemeProvider';
 import { authApi } from '@/api/auth';
 import { cn } from '@/utils/cn';
+import { formatAuthRolesForDisplay, workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -69,8 +70,8 @@ export default function SettingsPage() {
               <p className="font-semibold text-foreground text-lg">
                 {user?.username ?? 'User'}
               </p>
-              <p className="text-sm text-muted-foreground capitalize mt-0.5">
-                {user?.roles.join(', ')}
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {user?.roles?.length ? formatAuthRolesForDisplay(user.roles) : '—'}
               </p>
             </div>
           </div>
@@ -132,7 +133,7 @@ export default function SettingsPage() {
                 <div key={role.id} className="rounded-lg border border-border p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <Key className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-semibold capitalize">{role.name}</span>
+                    <span className="text-sm font-semibold">{workflowAssigneeRoleLabel(role.name)}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {role.permissions.length > 0 ? (

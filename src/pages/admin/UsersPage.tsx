@@ -44,6 +44,21 @@ const ROLE_COLORS: Record<string, string> = {
   submitter: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:ring-emerald-800',
 };
 
+/** Human label: matches `roles.description` from auth API (same titles as Create User rank). */
+function roleDisplayLabel(role: Pick<Role, 'name' | 'description'>): string {
+  const d = role.description?.trim();
+  if (d) return d;
+  return role.name.replace(/_/g, ' ');
+}
+
+/** Grade ladder roles only — `level` set in migration 006; ordered high → low like the rank picker. */
+function gradeRolesSorted(all: Role[] | undefined): Role[] {
+  if (!all?.length) return [];
+  return [...all]
+    .filter((r) => r.level != null && typeof r.level === 'number')
+    .sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
+}
+
 /** Canonical permission keys (aligned with backend `permissions` table / JWT claims). */
 const ALL_PERMISSIONS = [
   'view_document',
@@ -122,8 +137,8 @@ type CreateUserForm    = z.infer<typeof createUserSchema>;
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 type CreateRoleForm    = z.infer<typeof createRoleSchema>;
 
-/** Official designation titles — aligned with `nhia_designations` seed in backend migration 007. */
-const NHIA_STAFF_RANK_OPTIONS = [
+/** Fallback rank titles if grade roles are not returned from `/auth/roles` (offline / empty DB). */
+const NHIA_RANK_FALLBACK_OPTIONS = [
   'Director General',
   'Director',
   'Deputy Director',
@@ -171,6 +186,8 @@ export default function UsersPage() {
     queryFn: () => authApi.listRoles(),
     staleTime: 60_000,
   });
+
+  const gradeRoles = useMemo(() => gradeRolesSorted(allRoles), [allRoles]);
 
   // Task counts per user
   const { data: taskMap } = useQuery({
@@ -258,11 +275,15 @@ export default function UsersPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-semibold capitalize">{u.username}</p>
-                          {u.roles.map((r) => (
-                            <span key={r.id} className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded-full capitalize', ROLE_COLORS[r.name] ?? 'bg-muted text-muted-foreground')}>
-                              {r.name}
-                            </span>
-                          ))}
+                          {u.roles.map((r) => {
+                            const def = allRoles?.find((x) => x.id === r.id);
+                            const label = roleDisplayLabel(def ?? r);
+                            return (
+                              <span key={r.id} className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded-full capitalize', ROLE_COLORS[r.name] ?? 'bg-muted text-muted-foreground')}>
+                                {label}
+                              </span>
+                            );
+                          })}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{u.email}</p>
                       </div>
@@ -328,7 +349,7 @@ export default function UsersPage() {
                       <tr key={role.id} className={cn('border-b border-border/50 last:border-0', idx % 2 !== 0 && 'bg-muted/20')}>
                         <td className="px-5 py-3.5">
                           <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full capitalize', ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground')}>
-                            {role.name}
+                            {roleDisplayLabel(role)}
                           </span>
                         </td>
                         {ALL_PERMISSIONS.map((p) => (
@@ -375,6 +396,7 @@ export default function UsersPage() {
         open={createUserOpen}
         onClose={() => setCreateUserOpen(false)}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['admin-users'] })}
+        gradeRoles={gradeRoles}
       />
       <CreateRoleDialog
         open={createRoleOpen}
@@ -420,7 +442,17 @@ export default function UsersPage() {
 }
 
 // ── Create User Dialog ────────────────────────────────────────────────────────
-function CreateUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
+function CreateUserDialog({
+  open,
+  onClose,
+  onSuccess,
+  gradeRoles,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+  gradeRoles: Role[];
+}) {
   const { register, handleSubmit, reset, control, setValue, formState: { errors } } = useForm<CreateUserForm>({
     resolver: zodResolver(createUserSchema),
     defaultValues: {
@@ -524,11 +556,20 @@ function CreateUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
-                        {NHIA_STAFF_RANK_OPTIONS.map((title) => (
-                          <SelectItem key={title} value={title}>
-                            {title}
-                          </SelectItem>
-                        ))}
+                        {(gradeRoles.length > 0
+                          ? gradeRoles.map((r) => {
+                              const title = roleDisplayLabel(r);
+                              return (
+                                <SelectItem key={r.id} value={title}>
+                                  {title}
+                                </SelectItem>
+                              );
+                            })
+                          : NHIA_RANK_FALLBACK_OPTIONS.map((title) => (
+                              <SelectItem key={title} value={title}>
+                                {title}
+                              </SelectItem>
+                            )))}
                       </SelectContent>
                     </Select>
                   )}
@@ -743,8 +784,15 @@ function ManageRolesDialog({ user, allRoles, onClose, onSuccess }: {
                     <Shield className={cn('h-4 w-4', assigned ? 'text-primary' : 'text-muted-foreground')} />
                   </div>
                   <div>
-                    <p className={cn('text-sm font-semibold capitalize', assigned && 'text-primary')}>{role.name}</p>
-                    <p className="text-xs text-muted-foreground">{role.permissions.join(', ') || 'No permissions'}</p>
+                    <p className={cn('text-sm font-semibold', assigned && 'text-primary')}>{roleDisplayLabel(role)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-mono text-[10px] uppercase tracking-wide">{role.name}</span>
+                      {role.permissions.length > 0 ? (
+                        <> · {role.permissions.join(', ')}</>
+                      ) : (
+                        <> · No permissions</>
+                      )}
+                    </p>
                   </div>
                 </div>
                 <Button
@@ -787,7 +835,7 @@ function RolePermissionsDialog({
   const mutation = useMutation({
     mutationFn: (permissionNames: string[]) => authApi.setRolePermissions(role.id, permissionNames),
     onSuccess: () => {
-      toast.success(`Updated permissions for ${role.name}`);
+      toast.success(`Updated permissions for ${roleDisplayLabel(role)}`);
       onSaved();
       onClose();
     },
@@ -806,7 +854,7 @@ function RolePermissionsDialog({
             <Edit className="h-5 w-5" /> Edit Role Permissions
           </DialogTitle>
           <DialogDescription>
-            Update permission grants for <strong className="capitalize">{role.name}</strong>.
+            Update permission grants for <strong>{roleDisplayLabel(role)}</strong>.
           </DialogDescription>
         </DialogHeader>
 

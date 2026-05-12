@@ -16,6 +16,7 @@ import {
 import { cn } from '@/utils/cn';
 import { canAccessTemplateManagement } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
+import { formatAuthRolesForDisplay } from '@/utils/workflowEditor';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -257,8 +258,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <p className="text-xs font-medium text-sidebar-foreground truncate">
                 {user.username ?? user.roles.join(', ')}
               </p>
-              <p className="text-[10px] text-sidebar-foreground/50 truncate capitalize">
-                {user.roles.join(', ')}
+              <p className="text-[10px] text-sidebar-foreground/50 truncate">
+                {formatAuthRolesForDisplay(user.roles)}
               </p>
             </div>
           </div>

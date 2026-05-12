@@ -70,11 +70,6 @@ function TaskNode({ el }: { el: BpmnWorkflowElement }) {
       <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 leading-snug line-clamp-3">
         {el.title}
       </p>
-      {el.assignee_role && (
-        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 capitalize truncate">
-          {el.assignee_role.replace(/_/g, ' ')}
-        </p>
-      )}
       {el.badge && (
         <p className={`text-[10px] mt-1.5 font-medium ${pal.text}`}>
           <span className="mr-1">{el.badge.symbol}</span>
