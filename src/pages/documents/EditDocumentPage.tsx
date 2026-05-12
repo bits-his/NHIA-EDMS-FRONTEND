@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
+import {
+  getPendingDocumentWorkflowStageLabel,
+  getWorkflowStepDefinitionForInstance,
+} from '@/utils/workflowStageLabel';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -77,15 +80,25 @@ export default function EditDocumentPage() {
     [myTasks, document?.id, wfInstance]
   );
 
+  const currentWorkflowStepDef = useMemo(
+    () => getWorkflowStepDefinitionForInstance(wfInstance ?? undefined, wfTemplate ?? undefined),
+    [wfInstance, wfTemplate]
+  );
+
   const editActions = useMemo(() => {
     if (!document) return null;
-    return getDocumentActions(document.status, user?.roles ?? [], {
-      permissions: user?.permissions ?? [],
-      userId: user?.user_id,
-      ownerId: document.owner_id,
-      hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
-    });
-  }, [document, user, hasActiveWorkflowTaskForDoc]);
+    return getDocumentActions(
+      document.status,
+      user?.roles ?? [],
+      {
+        permissions: user?.permissions ?? [],
+        userId: user?.user_id,
+        ownerId: document.owner_id,
+        hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+      },
+      currentWorkflowStepDef?.action_type ?? null
+    );
+  }, [document, user, hasActiveWorkflowTaskForDoc, currentWorkflowStepDef?.action_type]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors, isDirty } } = useForm<EditForm>({
     resolver: zodResolver(editSchema),

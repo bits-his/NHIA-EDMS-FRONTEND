@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Shield, Search, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,7 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { auditApi } from '@/api/audit';
 import { useAuthStore } from '@/stores/authStore';
-import { QUERY_KEYS, SEEDED_USER_IDS } from '@/utils/constants';
+import { QUERY_KEYS } from '@/utils/constants';
 import { KNOWN_USERS } from '@/utils/users';
 import { cn } from '@/utils/cn';
 
@@ -26,22 +26,23 @@ type QueryMode = 'actor' | 'entity';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const KNOWN_USER_OPTIONS = SEEDED_USER_IDS.map((id) => ({
-  id,
-  name: KNOWN_USERS[id] ?? id.slice(0, 8) + '…',
-}));
+const MY_TRAIL_LIMIT = 500;
 
 export default function AuditPage() {
   const user = useAuthStore((s) => s.user);
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const hasRole = useAuthStore((s) => s.hasRole);
-  const canViewRecent = hasPermission('view_audit_logs') || hasRole('admin');
+  const canViewGlobalAudit = hasPermission('view_audit_logs') || hasRole('admin');
 
-  const [mode, setMode] = useState<QueryMode>('actor');
-  const [actorId, setActorId] = useState(user?.user_id ?? '');
+  const [mode, setMode] = useState<QueryMode>('entity');
+  const [actorId, setActorId] = useState('');
   const [entityType, setEntityType] = useState('document');
   const [entityId, setEntityId] = useState('');
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (user?.user_id) setActorId((prev) => (prev.trim() === '' ? user.user_id : prev));
+  }, [user?.user_id]);
 
   const trimmedEntityId = entityId.trim();
   const trimmedActorId = actorId.trim();
@@ -49,7 +50,7 @@ export default function AuditPage() {
   const actorIdValid = UUID_RE.test(trimmedActorId);
 
   const searchQuery = useMemo(() => {
-    if (mode === 'actor') return { actor_id: trimmedActorId };
+    if (mode === 'actor') return { actor_id: trimmedActorId, limit: MY_TRAIL_LIMIT };
     return { entity_type: entityType, entity_id: trimmedEntityId };
   }, [mode, entityType, trimmedActorId, trimmedEntityId]);
 
@@ -60,7 +61,18 @@ export default function AuditPage() {
   const { data: recentLogs, isLoading: recentLoading } = useQuery({
     queryKey: QUERY_KEYS.auditLogsRecent(80),
     queryFn: () => auditApi.getRecentLogs(80),
-    enabled: canViewRecent,
+    enabled: canViewGlobalAudit,
+    staleTime: 30_000,
+  });
+
+  const { data: myTrail, isLoading: myTrailLoading, error: myTrailError, refetch: refetchMyTrail } = useQuery({
+    queryKey: QUERY_KEYS.auditLogsMyTrail(user?.user_id ?? '', MY_TRAIL_LIMIT),
+    queryFn: () =>
+      auditApi.getLogs({
+        actor_id: user!.user_id,
+        limit: MY_TRAIL_LIMIT,
+      }),
+    enabled: Boolean(user?.user_id),
     staleTime: 30_000,
   });
 
@@ -76,21 +88,26 @@ export default function AuditPage() {
 
   const selectedActorName = KNOWN_USERS[trimmedActorId] ?? (trimmedActorId ? trimmedActorId.slice(0, 8) + '…' : '');
 
+  const KNOWN_USER_OPTIONS = useMemo(() => {
+    const ids = Object.keys(KNOWN_USERS);
+    return ids.map((id) => ({ id, name: KNOWN_USERS[id] ?? id.slice(0, 8) + '…' }));
+  }, []);
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Audit Log"
-        description="Immutable, append-only record of significant actions (documents, workflows, and more)"
+        description="Chronological record of who did what and when: opening documents (view), saving changes (edit), workflow steps (submit, approve, reject, archive), tasks, and sign-ins — with exact timestamps."
       />
 
-      {canViewRecent && (
+      {canViewGlobalAudit && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Shield className="h-4 w-4" /> Recent system activity
             </CardTitle>
             <p className="text-xs text-muted-foreground font-normal">
-              Newest first · up to 80 events across all users and entities
+              Newest first · up to 80 events across all users (requires admin or view audit logs permission)
             </p>
           </CardHeader>
           <CardContent>
@@ -102,32 +119,60 @@ export default function AuditPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="h-4 w-4" /> Your audit trail
+          </CardTitle>
+          <p className="text-xs text-muted-foreground font-normal">
+            Actions recorded under your account, newest first (up to {MY_TRAIL_LIMIT} entries).
+          </p>
+        </CardHeader>
+        <CardContent>
+          {myTrailError ? (
+            <ErrorState error={myTrailError} onRetry={() => void refetchMyTrail()} title="Could not load your trail" />
+          ) : (
+            <AuditTimeline logs={myTrail ?? []} loading={myTrailLoading} />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4" /> Search audit logs
           </CardTitle>
+          {!canViewGlobalAudit && (
+            <p className="text-xs text-muted-foreground font-normal pt-1">
+              You can search by document, workflow instance, or workflow task you are allowed to see. Searching
+              another user&apos;s activity is restricted to administrators and audit officers.
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-1 p-1 bg-muted rounded-lg w-fit">
-            {(['actor', 'entity'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => {
-                  setMode(m);
-                  setSubmitted(false);
-                }}
-                className={cn(
-                  'px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize',
-                  mode === m
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                By {m}
-              </button>
-            ))}
+            {canViewGlobalAudit &&
+              (['actor', 'entity'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setMode(m);
+                    setSubmitted(false);
+                  }}
+                  className={cn(
+                    'px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize',
+                    mode === m
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  By {m}
+                </button>
+              ))}
+            {!canViewGlobalAudit && (
+              <span className="px-4 py-1.5 text-sm font-medium text-foreground">By entity</span>
+            )}
           </div>
 
-          {mode === 'actor' ? (
+          {mode === 'actor' && canViewGlobalAudit ? (
             <div className="space-y-3">
               <Label>Select user</Label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -193,7 +238,7 @@ export default function AuditPage() {
           ) : (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Find audit events linked to a specific document, task, workflow instance, or user record.
+                Find events linked to a document, workflow instance, or workflow task you can access.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -204,9 +249,9 @@ export default function AuditPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="document">Document</SelectItem>
-                      <SelectItem value="task">Task</SelectItem>
+                      <SelectItem value="workflow_task">Workflow task</SelectItem>
                       <SelectItem value="workflow_instance">Workflow instance</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="user">User (your account only)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -222,7 +267,7 @@ export default function AuditPage() {
                     className="font-mono text-xs"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Tip: copy the ID from the relevant detail page
+                    Tip: copy the ID from the document or task screen.
                   </p>
                 </div>
               </div>
@@ -240,18 +285,6 @@ export default function AuditPage() {
           )}
         </CardContent>
       </Card>
-
-      {!canViewRecent && !submitted && (
-        <div className="flex flex-col items-center py-12 text-center border border-dashed border-border rounded-xl bg-muted/20">
-          <Shield className="h-8 w-8 text-muted-foreground mb-2" strokeWidth={1.5} />
-          <p className="text-sm font-medium text-foreground">Run a search</p>
-          <p className="text-xs text-muted-foreground mt-1.5 max-w-sm leading-relaxed px-4">
-            The live system-wide feed requires the <strong>view audit logs</strong> permission (or admin). You can
-            still search by <strong>your user ID</strong> or by <strong>document / task / workflow UUID</strong>{' '}
-            above.
-          </p>
-        </div>
-      )}
 
       {submitted && !searchEnabled && (
         <div className="flex flex-col items-center py-10 text-center text-muted-foreground text-sm">
@@ -274,7 +307,9 @@ export default function AuditPage() {
                 {logs ? ` (${logs.length} entries)` : ''}
               </CardTitle>
               {logs && logs.length > 0 && (
-                <span className="text-xs text-muted-foreground">Oldest → newest</span>
+                <span className="text-xs text-muted-foreground">
+                  {mode === 'actor' ? 'Newest first' : 'Oldest → newest'}
+                </span>
               )}
             </div>
           </CardHeader>

@@ -37,7 +37,8 @@ export function RoleGuard({
   fallback?: ReactNode;
 }) {
   const userRoles = useAuthStore((s) => s.user?.roles ?? []);
-  const hasRole = roles.some((r) => userRoles.includes(r));
+  const userRoleSet = new Set(userRoles.map((r) => String(r).toLowerCase()));
+  const hasRole = roles.some((r) => userRoleSet.has(String(r).toLowerCase()));
 
   if (!hasRole) {
     return fallback ? <>{fallback}</> : null;

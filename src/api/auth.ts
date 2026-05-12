@@ -67,6 +67,24 @@ export const authApi = {
     return res.data;
   },
 
+  /** NHIA profile + org text fields (requires manage_users). */
+  updateUserAdmin: async (
+    userId: string,
+    data: {
+      email?: string;
+      full_name?: string;
+      phone?: string;
+      rank?: string;
+      department?: string;
+      zone?: string;
+      state?: string;
+      unit?: string;
+    }
+  ): Promise<UserRecord> => {
+    const res = await authClient.put<UserRecord>(`/auth/users/${userId}/admin`, data);
+    return res.data;
+  },
+
   resetPassword: async (userId: string, password: string): Promise<{ message: string }> => {
     const res = await authClient.put<{ message: string }>(`/auth/users/${userId}/password`, { password });
     return res.data;

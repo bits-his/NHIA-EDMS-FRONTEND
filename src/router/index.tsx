@@ -122,7 +122,12 @@ export const router = createBrowserRouter([
         path: 'audit',
         element: (
           <Wrap>
-            <AuditPage />
+            <RoleGuard
+              roles={['admin', 'director', 'general_manager']}
+              fallback={<Navigate to="/dashboard" replace />}
+            >
+              <AuditPage />
+            </RoleGuard>
           </Wrap>
         ),
       },

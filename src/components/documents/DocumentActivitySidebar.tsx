@@ -14,6 +14,39 @@ const ACTION_LABELS: Record<string, string> = {
   final_approve: 'Final approval',
 };
 
+/** Rank, department, zone or state — omit missing parts. */
+function formatActorContext(a: DocumentWorkflowAction): string {
+  const parts: string[] = [];
+  const rank = a.actor_rank?.trim();
+  const dept = a.actor_department?.trim();
+  const zone = a.actor_zone?.trim();
+  const state = a.actor_state?.trim();
+  if (rank) parts.push(rank);
+  if (dept) parts.push(dept);
+  if (zone) parts.push(zone);
+  else if (state) parts.push(state);
+  return parts.join(', ');
+}
+
+function actorDisplayName(a: DocumentWorkflowAction): string {
+  const full = a.actor_full_name?.trim();
+  if (full) return full;
+  const user = a.actor_username?.trim();
+  if (user) return user;
+  return resolveUsername(a.actor_id);
+}
+
+/** One line: timestamp, Name (context), action label, comments */
+function formatActionTakenLine(a: DocumentWorkflowAction): string {
+  const ts = formatDateTime(a.created_at);
+  const name = actorDisplayName(a);
+  const ctx = formatActorContext(a);
+  const actionLabel = ACTION_LABELS[a.action] ?? a.action.replace(/_/g, ' ');
+  const head = ctx ? `${ts}, ${name} (${ctx}), ${actionLabel}` : `${ts}, ${name}, ${actionLabel}`;
+  const c = a.comment?.trim();
+  return c ? `${head}, ${c}` : head;
+}
+
 interface DocumentActivitySidebarProps {
   createdAt: string;
   actions: DocumentWorkflowAction[] | undefined;
@@ -51,7 +84,7 @@ export function DocumentActivitySidebar({
             Actions taken
           </CardTitle>
           <p className="text-xs text-muted-foreground font-normal pt-1">
-            Reject, edit/approve forward, requests, final approval — with timestamp.
+            Timestamp, actor (rank, department, zone or state), action type, comments.
           </p>
         </CardHeader>
         <CardContent className="px-4 pb-4">
@@ -68,19 +101,11 @@ export function DocumentActivitySidebar({
                 {actions.map((a) => (
                   <li
                     key={a.id}
-                    className="border-l-2 border-primary/30 pl-3 py-0.5"
+                    className="border-l-2 border-primary/30 pl-3 py-1 rounded-r-md bg-muted/20"
                   >
-                    <p className="font-medium text-foreground">
-                      {ACTION_LABELS[a.action] ?? a.action.replace(/_/g, ' ')}
+                    <p className="text-sm text-foreground leading-relaxed break-words">
+                      {formatActionTakenLine(a)}
                     </p>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                      {formatDateTime(a.created_at)} · {resolveUsername(a.actor_id)}
-                    </p>
-                    {a.comment ? (
-                      <p className="text-xs mt-1 text-foreground/90 bg-muted/50 rounded-md px-2 py-1.5">
-                        {a.comment}
-                      </p>
-                    ) : null}
                   </li>
                 ))}
               </ul>

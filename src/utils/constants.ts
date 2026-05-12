@@ -72,6 +72,7 @@ export const QUERY_KEYS = {
   tasksOperationalAll: () => ['tasks', 'operational', 'all'] as const,
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
+  auditLogsMyTrail: (userId: string, limit: number) => ['audit-logs', 'my-trail', userId, limit] as const,
   auditLogsForDocument: (documentId: string) => ['audit-logs', 'for-document', documentId] as const,
   auditLogsRecent: (limit: number) => ['audit-logs-recent', limit] as const,
   notifications: (userId: string) => ['notifications', userId],

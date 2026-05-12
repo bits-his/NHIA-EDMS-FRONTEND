@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText, Layers, CheckSquare, Shield, Plus, Search,
   ArrowRight, Bell, TrendingUp, Clock, AlertTriangle, Activity, Users,
+  CheckCircle, XCircle, LayoutDashboard, User, Radar,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,15 +23,152 @@ import { documentsApi } from '@/api/documents';
 import { authApi } from '@/api/auth';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatRelative, isOverdue } from '@/utils/formatters';
-import { canCreateDocument, canViewOperationalOverview, canAccessTemplateManagement } from '@/utils/permissions';
+import {
+  canCreateDocument,
+  canViewOperationalOverview,
+  canAccessTemplateManagement,
+  showOfficerHomeDashboard,
+  canDirectorToggleOperationalDashboard,
+  canAccessAuditLogModule,
+} from '@/utils/permissions';
 import { resolveUsername, registerUsers } from '@/utils/users';
+import { buildUserDashboardActivityFeed } from '@/utils/userActivityFeed';
 import { cn } from '@/utils/cn';
 import type { Task } from '@/types/task';
 
+const DIRECTOR_DASHBOARD_VIEW_KEY = 'nhia-edms-director-dashboard-view';
+
+type DirectorDashboardView = '360' | 'personal';
+
+function readStoredDirectorView(): DirectorDashboardView {
+  try {
+    const v = localStorage.getItem(DIRECTOR_DASHBOARD_VIEW_KEY);
+    return v === 'personal' ? 'personal' : '360';
+  } catch {
+    return '360';
+  }
+}
+
+/** Directors: switch between org 360 operations and personal workspace (persisted). */
+function DirectorDashboardShell() {
+  const [view, setView] = useState<DirectorDashboardView>(readStoredDirectorView);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DIRECTOR_DASHBOARD_VIEW_KEY, view);
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
+
+  return (
+    <div className="space-y-4">
+      <div
+        className={cn(
+          'rounded-2xl border px-4 py-3 sm:py-3.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4',
+          'border-emerald-200/50 dark:border-emerald-900/40',
+          'bg-gradient-to-br from-emerald-50/80 via-background to-violet-50/80',
+          'dark:from-emerald-950/35 dark:via-background dark:to-violet-950/35',
+          'shadow-sm shadow-emerald-500/5 dark:shadow-violet-500/10'
+        )}
+      >
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-md transition-all duration-300',
+              view === 'personal'
+                ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/30'
+                : 'bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-600 shadow-violet-500/30'
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">Leadership workspace</p>
+            <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">My dashboard</span>
+              {' — '}your tasks and documents you own.
+              {' '}
+              <span className="font-medium text-violet-700 dark:text-violet-400">360 · Operations</span>
+              {' — '}organisation-wide oversight (Director / GM grades and legacy director role).
+            </p>
+          </div>
+        </div>
+        <div className="flex w-full sm:w-auto items-stretch sm:items-center gap-2 sm:gap-2.5 shrink-0 p-1 rounded-2xl bg-muted/40 dark:bg-muted/20 border border-border/60">
+          <button
+            type="button"
+            onClick={() => setView('personal')}
+            className={cn(
+              'flex flex-1 sm:flex-none min-h-[2.75rem] sm:min-h-0 items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+              view === 'personal'
+                ? cn(
+                    'text-white shadow-lg shadow-emerald-500/30',
+                    'bg-gradient-to-br from-emerald-500 to-teal-600',
+                    'ring-2 ring-emerald-400/50 ring-offset-2 ring-offset-background scale-[1.02]'
+                  )
+                : cn(
+                    'text-emerald-800 dark:text-emerald-300',
+                    'bg-emerald-100/70 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60',
+                    'hover:bg-emerald-200/80 dark:hover:bg-emerald-900/45 hover:border-emerald-300 dark:hover:border-emerald-700'
+                  )
+            )}
+          >
+            <User
+              className={cn(
+                'h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0',
+                view === 'personal' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'
+              )}
+            />
+            My dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('360')}
+            className={cn(
+              'flex flex-1 sm:flex-none min-h-[2.75rem] sm:min-h-0 items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+              view === '360'
+                ? cn(
+                    'text-white shadow-lg shadow-violet-500/35',
+                    'bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-600',
+                    'ring-2 ring-violet-400/50 ring-offset-2 ring-offset-background scale-[1.02]'
+                  )
+                : cn(
+                    'text-violet-800 dark:text-violet-300',
+                    'bg-violet-100/70 dark:bg-violet-950/50 border border-violet-200/80 dark:border-violet-800/60',
+                    'hover:bg-violet-200/80 dark:hover:bg-violet-900/45 hover:border-violet-300 dark:hover:border-violet-700'
+                  )
+            )}
+          >
+            <Radar
+              className={cn(
+                'h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0',
+                view === '360' ? 'text-white' : 'text-violet-600 dark:text-violet-400'
+              )}
+            />
+            360 · Operations
+          </button>
+        </div>
+      </div>
+
+      {view === '360' ? <Operational360Dashboard /> : <UserDashboard documentScope="mine" />}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const operational = canViewOperationalOverview(user?.roles ?? [], user?.permissions ?? []);
-  return operational ? <Operational360Dashboard /> : <UserDashboard />;
+  const roles = user?.roles ?? [];
+  const operational = canViewOperationalOverview(roles, user?.permissions ?? []);
+  const directorToggle = canDirectorToggleOperationalDashboard(roles);
+
+  if (operational && directorToggle) {
+    return <DirectorDashboardShell />;
+  }
+  if (operational) return <Operational360Dashboard />;
+  if (showOfficerHomeDashboard(roles)) return <OfficerDashboard />;
+  return <UserDashboard />;
 }
 
 // ─── Shared components ────────────────────────────────────────────────────────
@@ -80,6 +218,7 @@ function Operational360Dashboard() {
 
   const isAdmin = user?.roles.includes('admin') ?? false;
   const canRecentAudit = isAdmin || hasPermission('view_audit_logs');
+  const showAuditLogPage = canAccessAuditLogModule(user?.roles);
 
   useQuery({
     queryKey: ['dashboard-register-users'],
@@ -378,7 +517,9 @@ function Operational360Dashboard() {
               {canAccessTemplateManagement(user?.roles ?? []) && (
                 <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
               )}
-              <QuickAction icon={Shield}    label="Audit Log"        path="/audit"         navigate={navigate} />
+              {showAuditLogPage && (
+                <QuickAction icon={Shield}    label="Audit Log"        path="/audit"         navigate={navigate} />
+              )}
               <QuickAction icon={Search}    label="Search & OCR"     path="/search"        navigate={navigate} />
               {isAdmin && (
                 <QuickAction icon={Users} label="User management" path="/admin/users" navigate={navigate} />
@@ -454,9 +595,11 @@ function Operational360Dashboard() {
             <Activity className="h-4 w-4 text-primary" />
             {canRecentAudit ? 'System activity' : 'Your recent audit'}
           </CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
-            Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
-          </Button>
+          {showAuditLogPage && (
+            <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
+              Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           <AuditTimeline logs={(allAudit ?? []).slice(0, 8)} loading={auditLoading} compact />
@@ -492,12 +635,247 @@ function Operational360Dashboard() {
   );
 }
 
-// ─── User Dashboard (reviewer / submitter) ────────────────────────────────────
-function UserDashboard() {
+// ─── Officer dashboard (officer / senior_officer — documents, no task queue) ─
+function OfficerDashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const showAuditLogPage = canAccessAuditLogModule(user?.roles);
+
+  const { data: recentAudit, isLoading: auditLoading } = useQuery({
+    queryKey: ['audit-recent', user?.user_id],
+    queryFn: () => auditApi.getLogs({ actor_id: user!.user_id }),
+    enabled: !!user?.user_id,
+  });
+
+  const { data: myDocuments, isLoading: myDocsLoading } = useQuery({
+    queryKey: [QUERY_KEYS.allDocuments, user?.user_id ?? 'anon'],
+    queryFn: () => documentsApi.listAll(),
+    enabled: !!user?.user_id,
+    staleTime: 30_000,
+  });
+
+  const docs = myDocuments ?? [];
+
+  const activityFeed = useMemo(
+    () =>
+      user?.user_id
+        ? buildUserDashboardActivityFeed({
+            userId: user.user_id,
+            auditLogs: recentAudit ?? [],
+            myDocuments: docs,
+            myTasks: [],
+            limit: 48,
+            viewerDisplay: { username: user.username, full_name: null },
+          })
+        : [],
+    [user?.user_id, user?.username, recentAudit, docs]
+  );
+
+  const totalCreated = docs.length;
+  const approvedCount = docs.filter((d) => d.status === 'approved' || d.status === 'archived').length;
+  const rejectedCount = docs.filter((d) => d.status === 'rejected').length;
+  const pendingCount = docs.filter((d) => d.status === 'pending').length;
+
+  const stats = [
+    {
+      label: 'Documents created',
+      value: totalCreated,
+      sub: 'you own',
+      icon: FileText,
+      color: 'text-primary',
+      bg: 'bg-primary/10',
+      ring: 'ring-primary/10',
+      onClick: () => navigate('/documents'),
+    },
+    {
+      label: 'Approved / filed',
+      value: approvedCount,
+      sub: 'approved or archived',
+      icon: CheckCircle,
+      color: 'text-emerald-600 dark:text-emerald-400',
+      bg: 'bg-emerald-50 dark:bg-emerald-900/20',
+      ring: 'ring-emerald-100 dark:ring-emerald-900/30',
+      onClick: () => navigate('/documents'),
+    },
+    {
+      label: 'Rejected',
+      value: rejectedCount,
+      sub: 'returned to rejected',
+      icon: XCircle,
+      color: 'text-red-600 dark:text-red-400',
+      bg: 'bg-red-50 dark:bg-red-900/20',
+      ring: 'ring-red-100 dark:ring-red-900/30',
+      onClick: () => navigate('/documents'),
+    },
+    {
+      label: 'Unread notifications',
+      value: unreadCount,
+      sub: pendingCount > 0 ? `${pendingCount} memo(s) in workflow` : 'none waiting',
+      icon: Bell,
+      color: 'text-amber-600 dark:text-amber-400',
+      bg: 'bg-amber-50 dark:bg-amber-900/20',
+      ring: 'ring-amber-100 dark:ring-amber-900/30',
+      onClick: () => navigate('/notifications'),
+    },
+  ];
+
+  const loading = auditLoading || myDocsLoading;
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Officer dashboard"
+        description={`Welcome back, ${user?.username ?? 'there'}. Your memos and system activity — submissions and workflow steps are tracked on each document.`}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
+              <Search className="h-4 w-4" /> Search
+            </Button>
+            {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
+              <Button size="sm" onClick={() => navigate('/documents/new')}>
+                <Plus className="h-4 w-4" /> New document
+              </Button>
+            )}
+          </div>
+        }
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
+                <Skeleton className="h-10 w-10 rounded-xl" />
+                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            ))
+          : stats.map((s) => <StatCard key={s.label} {...s} />)}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 space-y-5">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Activity className="h-4 w-4 text-primary" />
+                Activity
+              </CardTitle>
+              {showAuditLogPage && (
+                <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
+                  Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              <AuditTimeline logs={activityFeed.slice(0, 16)} loading={loading} compact />
+            </CardContent>
+          </Card>
+
+          {docs.filter((d) => d.status === 'draft' || d.status === 'pending').length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">In progress</CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="text-xs">
+                  Open list <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {docs
+                  .filter((d) => d.status === 'draft' || d.status === 'pending')
+                  .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+                  .slice(0, 6)
+                  .map((doc) => (
+                    <div
+                      key={doc.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate(`/documents/${doc.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') navigate(`/documents/${doc.id}`);
+                      }}
+                      className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/25 hover:bg-muted/30 cursor-pointer transition-all"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="text-sm font-medium truncate">{doc.title}</p>
+                        <p className="text-xs text-muted-foreground">{formatRelative(doc.updated_at)}</p>
+                      </div>
+                      <DocumentStatusBadge status={doc.status} size="sm" />
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <div className="space-y-5">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Quick actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
+                <QuickAction icon={Plus} label="Create document" path="/documents/new" navigate={navigate} />
+              )}
+              <QuickAction icon={FileText} label="My documents" path="/documents" navigate={navigate} />
+              <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
+              <QuickAction icon={Search} label="Search & OCR" path="/search" navigate={navigate} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" />
+                Notifications
+                {unreadCount > 0 ? <Badge variant="default">{unreadCount}</Badge> : null}
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/notifications')} className="text-xs">
+                View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {notifications.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No notifications yet</p>
+              ) : (
+                <div className="space-y-2 max-h-[min(360px,50vh)] overflow-y-auto pr-1">
+                  {notifications.slice(0, 12).map((n) => (
+                    <div
+                      key={n.id}
+                      className={cn(
+                        'p-3 rounded-lg text-xs border',
+                        !n.read ? 'bg-primary/5 border-primary/15' : 'bg-muted/30 border-transparent'
+                      )}
+                    >
+                      <p
+                        className={cn(
+                          'leading-relaxed line-clamp-3',
+                          !n.read ? 'font-medium text-foreground' : 'text-foreground/80'
+                        )}
+                      >
+                        {n.message}
+                      </p>
+                      <p className="text-muted-foreground mt-1">{formatRelative(n.created_at)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── User Dashboard (submitter / reviewer / director personal view) ─────────
+function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'all' }) {
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const notifications = useNotificationStore((s) => s.notifications);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const showAuditLogPage = canAccessAuditLogModule(user?.roles);
 
   const { data: myTasks, isLoading: tasksLoading } = useQuery({
     queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
@@ -511,21 +889,65 @@ function UserDashboard() {
     enabled: !!user?.user_id,
   });
 
+  const { data: myDocuments, isLoading: myDocsLoading } = useQuery({
+    queryKey: [QUERY_KEYS.allDocuments, user?.user_id ?? 'anon'],
+    queryFn: () => documentsApi.listAll(),
+    enabled: !!user?.user_id,
+    staleTime: 30_000,
+  });
+
+  const scopedDocuments = useMemo(() => {
+    const raw = myDocuments ?? [];
+    if (documentScope !== 'mine' || !user?.user_id) return raw;
+    return raw.filter((d) => d.owner_id === user.user_id);
+  }, [myDocuments, documentScope, user?.user_id]);
+
+  const activityFeed = useMemo(
+    () =>
+      user?.user_id
+        ? buildUserDashboardActivityFeed({
+            userId: user.user_id,
+            auditLogs: recentAudit ?? [],
+            myDocuments: scopedDocuments,
+            myTasks: myTasks ?? [],
+            limit: 48,
+            viewerDisplay: { username: user.username, full_name: null },
+          })
+        : [],
+    [user?.user_id, user?.username, recentAudit, scopedDocuments, myTasks]
+  );
+
   const activeTasks    = myTasks?.filter((t) => t.status === 'pending' || t.status === 'in_progress') ?? [];
   const completedTasks = myTasks?.filter((t) => t.status === 'completed') ?? [];
 
-  const stats = [
-    { label: 'Active Tasks',          value: activeTasks.length,       sub: 'assigned to you',  icon: CheckSquare, color: 'text-blue-600 dark:text-blue-400',   bg: 'bg-blue-50 dark:bg-blue-900/20',   ring: 'ring-blue-100 dark:ring-blue-900/30',   onClick: () => navigate('/tasks') },
-    { label: 'Completed Tasks',       value: completedTasks.length,    sub: 'all time',          icon: TrendingUp,  color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20', ring: 'ring-emerald-100 dark:ring-emerald-900/30', onClick: () => navigate('/tasks') },
-    { label: 'Audit Events',          value: recentAudit?.length ?? 0, sub: 'by you',            icon: Shield,      color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-50 dark:bg-violet-900/20', ring: 'ring-violet-100 dark:ring-violet-900/30', onClick: () => navigate('/audit') },
-    { label: 'Unread Notifications',  value: unreadCount,              sub: 'awaiting review',   icon: Bell,        color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-50 dark:bg-amber-900/20',  ring: 'ring-amber-100 dark:ring-amber-900/30',  onClick: () => navigate('/notifications') },
-  ];
+  const stats = useMemo(
+    () => [
+      { label: 'Active Tasks',          value: activeTasks.length,       sub: 'assigned to you',  icon: CheckSquare, color: 'text-blue-600 dark:text-blue-400',   bg: 'bg-blue-50 dark:bg-blue-900/20',   ring: 'ring-blue-100 dark:ring-blue-900/30',   onClick: () => navigate('/tasks') },
+      { label: 'Completed Tasks',       value: completedTasks.length,    sub: 'all time',          icon: TrendingUp,  color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20', ring: 'ring-emerald-100 dark:ring-emerald-900/30', onClick: () => navigate('/tasks') },
+      {
+        label: 'Activity',
+        value: activityFeed.length,
+        sub: 'audit + docs + tasks',
+        icon: Shield,
+        color: 'text-violet-600 dark:text-violet-400',
+        bg: 'bg-violet-50 dark:bg-violet-900/20',
+        ring: 'ring-violet-100 dark:ring-violet-900/30',
+        onClick: showAuditLogPage ? () => navigate('/audit') : undefined,
+      },
+      { label: 'Unread Notifications',  value: unreadCount,              sub: 'awaiting review',   icon: Bell,        color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-50 dark:bg-amber-900/20',  ring: 'ring-amber-100 dark:ring-amber-900/30',  onClick: () => navigate('/notifications') },
+    ],
+    [activeTasks.length, completedTasks.length, activityFeed.length, unreadCount, navigate, showAuditLogPage]
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Dashboard"
-        description={`Welcome back, ${user?.username ?? 'there'}. Here's your activity.`}
+        title={documentScope === 'mine' ? 'My dashboard' : 'Dashboard'}
+        description={
+          documentScope === 'mine'
+            ? `Welcome back, ${user?.username ?? 'there'}. Your tasks, documents you own, and your audit trail — organisation-wide lists are hidden here.`
+            : `Welcome back, ${user?.username ?? 'there'}. Tasks, documents you created, and audit events you performed appear below.`
+        }
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
@@ -541,7 +963,7 @@ function UserDashboard() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {tasksLoading || auditLoading
+        {tasksLoading || auditLoading || myDocsLoading
           ? Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
                 <Skeleton className="h-10 w-10 rounded-xl" />
@@ -640,13 +1062,19 @@ function UserDashboard() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Recent Activity</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
-            View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-          </Button>
+          <CardTitle className="text-base">Recent activity</CardTitle>
+          {showAuditLogPage && (
+            <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
+              Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
-          <AuditTimeline logs={(recentAudit ?? []).slice(0, 5)} loading={auditLoading} compact />
+          <AuditTimeline
+            logs={activityFeed.slice(0, 12)}
+            loading={auditLoading || myDocsLoading || tasksLoading}
+            compact
+          />
         </CardContent>
       </Card>
     </div>

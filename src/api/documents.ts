@@ -142,12 +142,13 @@ export const documentsApi = {
     return res.data;
   },
 
-  /** Pending → approved (no signatory gate — prefer finalApprove for official signing). */
+  /** Pending → approved (generic transition). Does not append an e-signature to document HTML. */
   approve: async (id: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve`);
     return res.data;
   },
 
+  /** Workflow final step: pending → archived (organisation registry) + audit row. Does not append e-signature. */
   finalApprove: async (id: string, comment?: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/final-approve`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
@@ -167,6 +168,7 @@ export const documentsApi = {
     return res.data;
   },
 
+  /** Workflow approve-forward step: appends user e-signature stamp to document body on the server. */
   approveForward: async (id: string, comment?: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve-forward`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),

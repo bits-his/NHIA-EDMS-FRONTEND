@@ -22,9 +22,25 @@ export const workflowApi = {
   },
 
   /** Move linear workflow to the next step (current assignee or reviewer/director/admin). */
-  advance: async (workflowInstanceId: string): Promise<AdvanceWorkflowResponse> => {
+  advance: async (
+    workflowInstanceId: string,
+    comment?: string
+  ): Promise<AdvanceWorkflowResponse> => {
     const res = await workflowClient.post<AdvanceWorkflowResponse>(
-      `/workflows/${workflowInstanceId}/advance`
+      `/workflows/${workflowInstanceId}/advance`,
+      comment !== undefined && comment !== '' ? { comment } : {}
+    );
+    return res.data;
+  },
+
+  /** Move workflow back one step (after reject / request-info on the document). */
+  stepBack: async (
+    workflowInstanceId: string,
+    comment?: string
+  ): Promise<AdvanceWorkflowResponse> => {
+    const res = await workflowClient.post<AdvanceWorkflowResponse>(
+      `/workflows/${workflowInstanceId}/step-back`,
+      comment !== undefined && comment !== '' ? { comment } : {}
     );
     return res.data;
   },

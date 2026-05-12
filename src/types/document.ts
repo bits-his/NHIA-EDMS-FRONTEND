@@ -61,7 +61,7 @@ export interface CreateRecipientInput {
   recipient_type: RecipientType;
 }
 
-/** Workflow steps logged in document_actions (server). */
+/** Workflow steps logged in document_actions (server). Includes actor profile when joined. */
 export interface DocumentWorkflowAction {
   id: string;
   document_id: string;
@@ -69,6 +69,12 @@ export interface DocumentWorkflowAction {
   action: string;
   comment: string | null;
   created_at: string;
+  actor_full_name?: string | null;
+  actor_username?: string | null;
+  actor_rank?: string | null;
+  actor_department?: string | null;
+  actor_zone?: string | null;
+  actor_state?: string | null;
 }
 
 export interface CreateDocumentRequest {

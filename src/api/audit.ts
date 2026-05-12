@@ -20,6 +20,9 @@ export const auditApi = {
       params = { entity_type: query.entity_type, entity_id: query.entity_id };
     } else if (query.actor_id) {
       params = { actor_id: query.actor_id };
+      if (query.limit != null && Number.isFinite(query.limit)) {
+        params.limit = String(Math.min(1000, Math.max(1, Math.floor(query.limit))));
+      }
     } else {
       // Nothing valid to query — return empty rather than sending a bad request
       return [];
@@ -34,8 +37,13 @@ export const auditApi = {
    * or tasks on those instances (same ordering as backend: oldest first).
    */
   getLogsForDocument: async (documentId: string): Promise<AuditLog[]> => {
-    const res = await auditClient.get<AuditLog[]>(`/audit/logs/for-document/${documentId}`);
-    return res.data;
+    try {
+      const res = await auditClient.get<AuditLog[]>(`/audit/logs/for-document/${documentId}`);
+      return res.data;
+    } catch (e) {
+      if (axios.isAxiosError(e) && (e.response?.status === 403 || e.response?.status === 404)) return [];
+      throw e;
+    }
   },
 
   /**

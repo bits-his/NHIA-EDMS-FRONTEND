@@ -60,7 +60,10 @@ import { resolveUsername } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
 import { isUuid } from '@/utils/uuid';
 import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
-import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
+import {
+  getPendingDocumentWorkflowStageLabel,
+  getWorkflowStepDefinitionForInstance,
+} from '@/utils/workflowStageLabel';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import type { RecipientType } from '@/types/document';
 
@@ -153,14 +156,29 @@ export default function DocumentDetailPage() {
     return Math.max(...nums, 0);
   }, [wfTemplate]);
 
-  const workflowAdvanceControl = useMemo(() => {
+  const currentWorkflowStepDef = useMemo(
+    () => getWorkflowStepDefinitionForInstance(wfInstance ?? undefined, wfTemplate ?? undefined),
+    [wfInstance, wfTemplate]
+  );
+
+  const workflowStepActionType = currentWorkflowStepDef?.action_type ?? null;
+
+  const workflowInstanceIdForActions = useMemo(() => {
     if (!doc || doc.status !== 'pending' || !wfInstance) return null;
     const active = new Set(['active', 'in_progress', 'pending_approval', 'pending_review']);
-    if (!active.has(wfInstance.status)) return null;
-    if (wfMaxStep < 1 || (wfInstance.current_step ?? 0) >= wfMaxStep) return null;
+    if (!active.has(String(wfInstance.status))) return null;
     if (!hasActiveWorkflowTaskForDoc) return null;
-    return { workflowInstanceId: wfInstance.id };
-  }, [doc, wfInstance, wfMaxStep, hasActiveWorkflowTaskForDoc]);
+    return wfInstance.id;
+  }, [doc, wfInstance, hasActiveWorkflowTaskForDoc]);
+
+  /** Includes the last template step so advance can complete the workflow (next step > max). */
+  const canAdvanceWorkflow = useMemo(() => {
+    if (!wfInstance || wfMaxStep < 1) return false;
+    const active = new Set(['active', 'in_progress', 'pending_approval', 'pending_review']);
+    if (!active.has(String(wfInstance.status))) return false;
+    const cur = wfInstance.current_step ?? 0;
+    return cur >= 1 && cur <= wfMaxStep;
+  }, [wfInstance, wfMaxStep]);
 
   const pendingStageLabel = useMemo(
     () =>
@@ -396,7 +414,10 @@ export default function DocumentDetailPage() {
                   ownerId: doc.owner_id,
                   hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
                 }}
-                workflowAdvance={workflowAdvanceControl}
+                workflowInstanceId={workflowInstanceIdForActions}
+                canAdvanceWorkflow={canAdvanceWorkflow}
+                workflowCurrentStep={wfInstance?.current_step ?? null}
+                workflowStepActionType={workflowStepActionType}
               />
             </div>
           </div>

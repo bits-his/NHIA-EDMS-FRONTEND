@@ -124,6 +124,16 @@ const createUserSchema = z.object({
   password:   z.string().min(6, 'At least 6 characters'),
 });
 
+const editProfileSchema = z.object({
+  email:      z.string().email('Valid email required'),
+  full_name:  z.string().max(255),
+  phone:      z.string().max(50),
+  rank:       z.string().max(100),
+  department: z.string().max(255),
+  zone:       z.string().max(100),
+  state:      z.string().max(100),
+});
+
 const resetPasswordSchema = z.object({
   password: z.string().min(6, 'At least 6 characters'),
   confirm:  z.string().min(6),
@@ -134,6 +144,7 @@ const createRoleSchema = z.object({
 });
 
 type CreateUserForm    = z.infer<typeof createUserSchema>;
+type EditProfileForm   = z.infer<typeof editProfileSchema>;
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 type CreateRoleForm    = z.infer<typeof createRoleSchema>;
 
@@ -163,6 +174,7 @@ export default function UsersPage() {
   const [resetPwUser,       setResetPwUser]        = useState<UserRecord | null>(null);
   const [deactivateUser,    setDeactivateUser]     = useState<UserRecord | null>(null);
   const [manageRolesUser,   setManageRolesUser]    = useState<UserRecord | null>(null);
+  const [editProfileUser,   setEditProfileUser]    = useState<UserRecord | null>(null);
   const [editPermRole,      setEditPermRole]       = useState<Role | null>(null);
 
   // ── Queries ──
@@ -294,6 +306,9 @@ export default function UsersPage() {
                           {taskMap![u.id]} active tasks
                         </span>
                       )}
+                      <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => setEditProfileUser(u)}>
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="ghost" size="icon-sm" title="Manage roles" onClick={() => setManageRolesUser(u)}>
                         <Shield className="h-3.5 w-3.5" />
                       </Button>
@@ -407,6 +422,14 @@ export default function UsersPage() {
         <ResetPasswordDialog
           user={resetPwUser}
           onClose={() => setResetPwUser(null)}
+        />
+      )}
+      {editProfileUser && (
+        <EditProfileDialog
+          user={editProfileUser}
+          gradeRoles={gradeRoles}
+          onClose={() => setEditProfileUser(null)}
+          onSuccess={() => qc.invalidateQueries({ queryKey: ['admin-users'] })}
         />
       )}
       {manageRolesUser && (
@@ -689,6 +712,266 @@ function CreateUserDialog({
           <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 shrink-0">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" loading={mutation.isPending}><UserPlus className="h-4 w-4" /> Create User</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Edit Profile Dialog ───────────────────────────────────────────────────────
+function EditProfileDialog({
+  user,
+  gradeRoles,
+  onClose,
+  onSuccess,
+}: {
+  user: UserRecord;
+  gradeRoles: Role[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { register, handleSubmit, reset, control, setValue, formState: { errors } } = useForm<EditProfileForm>({
+    resolver: zodResolver(editProfileSchema),
+    defaultValues: {
+      email: user.email ?? '',
+      full_name: user.full_name ?? '',
+      phone: user.phone ?? '',
+      rank: user.rank ?? '',
+      department: user.department ?? '',
+      zone: user.zone ?? '',
+      state: user.state ?? '',
+    },
+  });
+
+  useEffect(() => {
+    reset({
+      email: user.email ?? '',
+      full_name: user.full_name ?? '',
+      phone: user.phone ?? '',
+      rank: user.rank ?? '',
+      department: user.department ?? '',
+      zone: user.zone ?? '',
+      state: user.state ?? '',
+    });
+  }, [user.id, user.email, user.full_name, user.phone, user.rank, user.department, user.zone, user.state, reset]);
+
+  const watchedZone = useWatch({ control, name: 'zone' });
+
+  const { data: orgScope, isLoading: orgScopeLoading } = useQuery({
+    queryKey: QUERY_KEYS.orgScopeReference,
+    queryFn: () => documentsApi.getOrgScopeReference(),
+    staleTime: 60_000,
+  });
+
+  const filteredStateOffices = useMemo(() => {
+    if (!orgScope?.stateOffices?.length) return [];
+    const z = orgScope.zones?.find((x) => x.name === watchedZone);
+    if (!watchedZone?.trim() || !z) return orgScope.stateOffices;
+    return orgScope.stateOffices.filter((s) => s.zoneCode === z.code);
+  }, [orgScope, watchedZone]);
+
+  const mutation = useMutation({
+    mutationFn: (data: EditProfileForm) => {
+      const pick = (s: string) => {
+        const v = s.trim();
+        return v.length > 0 ? v : undefined;
+      };
+      return authApi.updateUserAdmin(user.id, {
+        email: data.email.trim().toLowerCase(),
+        full_name: pick(data.full_name),
+        phone: pick(data.phone),
+        rank: pick(data.rank),
+        department: pick(data.department),
+        zone: pick(data.zone),
+        state: pick(data.state),
+      });
+    },
+    onSuccess: () => {
+      toast.success('Profile updated');
+      onSuccess();
+      onClose();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+          <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5" /> Edit profile</DialogTitle>
+          <DialogDescription>
+            Update contact details and organisation fields for <strong className="capitalize">{user.username}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="flex flex-col min-h-0">
+          <div className="space-y-4 px-6 overflow-y-auto pb-4">
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Username </span>
+              <span className="font-medium capitalize">{user.username}</span>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ep-email">Email</Label>
+              <Input id="ep-email" type="email" placeholder="user@example.com" error={!!errors.email} {...register('email')} />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ep-full_name">Full name</Label>
+              <Input id="ep-full_name" placeholder="Legal name as on record" error={!!errors.full_name} {...register('full_name')} />
+              {errors.full_name && <p className="text-xs text-destructive">{errors.full_name.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ep-phone">Phone</Label>
+              <Input id="ep-phone" type="tel" placeholder="+234 …" error={!!errors.phone} {...register('phone')} />
+              {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-rank">Rank</Label>
+                <Controller
+                  name="rank"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="ep-rank"
+                        className={cn(errors.rank && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder="Select rank…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {(gradeRoles.length > 0
+                          ? gradeRoles.map((r) => {
+                              const title = roleDisplayLabel(r);
+                              return (
+                                <SelectItem key={r.id} value={title}>
+                                  {title}
+                                </SelectItem>
+                              );
+                            })
+                          : NHIA_RANK_FALLBACK_OPTIONS.map((title) => (
+                              <SelectItem key={title} value={title}>
+                                {title}
+                              </SelectItem>
+                            )))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.rank && <p className="text-xs text-destructive">{errors.rank.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-department">Department</Label>
+                <Controller
+                  name="department"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="ep-department"
+                        className={cn(errors.department && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder={orgScope ? 'Select department…' : 'Loading…'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {(orgScope?.departments ?? []).map((d) => (
+                          <SelectItem key={d.id} value={d.name}>
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.department && <p className="text-xs text-destructive">{errors.department.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-zone">Zone</Label>
+                <Controller
+                  name="zone"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => {
+                        field.onChange(v === SELECT_NONE ? '' : v);
+                        setValue('state', '');
+                      }}
+                    >
+                      <SelectTrigger
+                        id="ep-zone"
+                        className={cn(errors.zone && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue placeholder={orgScope ? 'Select zone…' : 'Loading…'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {(orgScope?.zones ?? []).map((z) => (
+                          <SelectItem key={z.code} value={z.name}>
+                            {z.code} — {z.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.zone && <p className="text-xs text-destructive">{errors.zone.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-state">State</Label>
+                <Controller
+                  name="state"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope || !watchedZone?.trim()}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="ep-state"
+                        className={cn(errors.state && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue
+                          placeholder={
+                            !orgScope
+                              ? 'Loading…'
+                              : !watchedZone?.trim()
+                                ? 'Select zone first…'
+                                : 'Select state office…'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {filteredStateOffices.map((s) => (
+                          <SelectItem key={`${s.zoneCode}-${s.name}`} value={s.name}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.state && <p className="text-xs text-destructive">{errors.state.message}</p>}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" loading={mutation.isPending}><Edit className="h-4 w-4" /> Save changes</Button>
           </DialogFooter>
         </form>
       </DialogContent>

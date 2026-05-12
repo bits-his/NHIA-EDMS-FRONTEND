@@ -11,7 +11,6 @@ import {
   MessageSquareWarning,
   Info,
   ShieldCheck,
-  StepForward,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -27,7 +26,11 @@ import {
 } from '@/components/ui/dialog';
 import { documentsApi } from '@/api/documents';
 import { workflowApi } from '@/api/workflow';
-import { getDocumentActions, type DocumentActionContext } from '@/utils/permissions';
+import {
+  getDocumentActions,
+  normalizeWorkflowStepActionType,
+  type DocumentActionContext,
+} from '@/utils/permissions';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
 import { startWorkflowFromDocumentTemplate } from '@/utils/startWorkflowFromDocumentTemplate';
@@ -37,22 +40,34 @@ import { useAuthStore } from '@/stores/authStore';
 interface DocumentActionsProps {
   document: Document;
   roles: string[];
-  /** When omitted, draft submit/edit still works for admin/submitter only (legacy). */
   actionContext?: DocumentActionContext;
-  /** When set, show “Forward workflow” for linear advance (assignee or reviewer). */
-  workflowAdvance?: { workflowInstanceId: string } | null;
+  /** Workflow instance when the viewer may act on an active linear route. */
+  workflowInstanceId?: string | null;
+  /** Whether the workflow may advance from the current step (including completing at the last step). */
+  canAdvanceWorkflow?: boolean;
+  /** Current linear workflow step (1-based); used to step back after reject / request-info. */
+  workflowCurrentStep?: number | null;
+  workflowStepActionType?: string | null;
 }
 
-type ConfirmActionType = 'submit' | 'archive' | 'advanceWorkflow';
+type ConfirmActionType = 'submit' | 'archive';
 
 type CommentDialogKind =
   | 'reject'
   | 'requestInfo'
-  | 'editForward'
   | 'approveForward'
-  | 'finalApprove';
+  | 'finalApprove'
+  | 'reviewForward';
 
-export function DocumentActions({ document, roles, actionContext, workflowAdvance }: DocumentActionsProps) {
+export function DocumentActions({
+  document,
+  roles,
+  actionContext,
+  workflowInstanceId,
+  canAdvanceWorkflow = false,
+  workflowCurrentStep,
+  workflowStepActionType,
+}: DocumentActionsProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentUserId = useAuthStore((s) => s.user?.user_id);
@@ -61,7 +76,17 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
   const [comment, setComment] = useState('');
   const [submitForReviewLoading, setSubmitForReviewLoading] = useState(false);
 
-  const actions = getDocumentActions(document.status, roles, actionContext);
+  const actions = getDocumentActions(document.status, roles, actionContext, workflowStepActionType);
+  const at = normalizeWorkflowStepActionType(workflowStepActionType);
+
+  const showApproveAndForward =
+    actions.canApproveForward && at !== 'review' && at !== 'final_approve';
+
+  const showReviewForward =
+    at === 'review' &&
+    Boolean(workflowInstanceId) &&
+    canAdvanceWorkflow &&
+    (actions.canReject || actions.canRequestInfo);
 
   const invalidateDoc = () => {
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.document(document.id) });
@@ -76,6 +101,16 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
     }
   };
 
+  const invalidateAfterWorkflow = (workflowId: string) => {
+    queryClient.invalidateQueries({
+      predicate: (q) =>
+        Array.isArray(q.queryKey) &&
+        q.queryKey[0] === 'workflow-bpmn-view' &&
+        q.queryKey[1] === workflowId,
+    });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowSteps(workflowId) });
+  };
+
   const mutation = useMutation({
     mutationFn: async (payload: { fn: () => Promise<Document>; message: string }) => {
       await payload.fn();
@@ -84,6 +119,9 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
     onSuccess: (message) => {
       toast.success(message);
       invalidateDoc();
+      if (workflowInstanceId) {
+        invalidateAfterWorkflow(workflowInstanceId);
+      }
       setPendingConfirm(null);
       setCommentDialog(null);
       setComment('');
@@ -91,6 +129,91 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
     onError: (error) => {
       toast.error(getErrorMessage(error));
     },
+  });
+
+  const approveAndForwardMutation = useMutation({
+    mutationFn: async (commentText: string) => {
+      const note = commentText.trim() || undefined;
+      await documentsApi.approveForward(document.id, note);
+      if (workflowInstanceId && canAdvanceWorkflow) {
+        return workflowApi.advance(workflowInstanceId);
+      }
+      return null;
+    },
+    onSuccess: (data) => {
+      if (data?.workflow) {
+        if (data.workflow.status === 'completed') {
+          toast.success('Approved and forwarded — workflow completed.');
+        } else {
+          toast.success('Approved forward; workflow moved to the next step.');
+        }
+        if (data.warnings?.length) {
+          toast.warning('Some notifications or tasks could not be updated.');
+        }
+        invalidateAfterWorkflow(data.workflow.id);
+      } else {
+        toast.success('Approved forward — your signature was appended to the document.');
+      }
+      invalidateDoc();
+      setCommentDialog(null);
+      setComment('');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const reviewForwardMutation = useMutation({
+    mutationFn: (commentText: string) => {
+      if (!workflowInstanceId) throw new Error('No workflow instance');
+      const note = commentText.trim() || undefined;
+      return workflowApi.advance(workflowInstanceId, note);
+    },
+    onSuccess: (data) => {
+      if (data.workflow.status === 'completed') {
+        toast.success('Forwarded — workflow completed.');
+      } else {
+        toast.success('Forwarded to the next step');
+      }
+      if (data.warnings?.length) {
+        toast.warning('Workflow moved, but some notifications or tasks could not be updated.');
+      }
+      invalidateDoc();
+      invalidateAfterWorkflow(data.workflow.id);
+      setCommentDialog(null);
+      setComment('');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const finalApproveAndAdvanceMutation = useMutation({
+    mutationFn: async (commentText: string) => {
+      const note = commentText.trim() || undefined;
+      await documentsApi.finalApprove(document.id, note);
+      if (workflowInstanceId && canAdvanceWorkflow) {
+        return workflowApi.advance(workflowInstanceId);
+      }
+      return null;
+    },
+    onSuccess: (data) => {
+      if (data?.workflow) {
+        if (data.workflow.status === 'completed') {
+          toast.success(
+            'Final approval recorded — document filed to the organisation registry and workflow completed.'
+          );
+        } else {
+          toast.success('Document filed to the organisation registry; workflow advanced.');
+        }
+        if (data.warnings?.length) {
+          toast.warning('Some notifications or tasks could not be updated.');
+        }
+        invalidateAfterWorkflow(data.workflow.id);
+      } else {
+        toast.success('Document filed to the organisation registry.');
+      }
+      invalidateDoc();
+      setCommentDialog(null);
+      setComment('');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const openCommentDialog = (kind: CommentDialogKind) => {
@@ -112,33 +235,56 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
     switch (commentDialog) {
       case 'reject':
         mutation.mutate({
-          fn: () => documentsApi.reject(document.id, c),
-          message: 'Document rejected',
+          fn: async () => {
+            const updated = await documentsApi.reject(document.id, c);
+            if (workflowInstanceId && (workflowCurrentStep ?? 0) > 1) {
+              try {
+                const res = await workflowApi.stepBack(workflowInstanceId, c);
+                if (res?.workflow?.id) invalidateAfterWorkflow(res.workflow.id);
+              } catch (e) {
+                toast.warning(
+                  `Document rejected, but the workflow could not move to the previous step: ${getErrorMessage(e)}`
+                );
+              }
+            }
+            return updated;
+          },
+          message:
+            (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
+              ? 'Document rejected — workflow returned to the previous step'
+              : 'Document rejected',
         });
         break;
       case 'requestInfo':
         mutation.mutate({
-          fn: () => documentsApi.requestInfo(document.id, c),
-          message: 'Information request recorded',
-        });
-        break;
-      case 'editForward':
-        mutation.mutate({
-          fn: () => documentsApi.editForward(document.id, c || undefined),
-          message: 'Edit-forward recorded',
+          fn: async () => {
+            const updated = await documentsApi.requestInfo(document.id, c);
+            if (workflowInstanceId && (workflowCurrentStep ?? 0) > 1) {
+              try {
+                const res = await workflowApi.stepBack(workflowInstanceId, c);
+                if (res?.workflow?.id) invalidateAfterWorkflow(res.workflow.id);
+              } catch (e) {
+                toast.warning(
+                  `Request recorded, but the workflow could not move to the previous step: ${getErrorMessage(e)}`
+                );
+              }
+            }
+            return updated;
+          },
+          message:
+            (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
+              ? 'Information request recorded — workflow returned to the previous step'
+              : 'Information request recorded',
         });
         break;
       case 'approveForward':
-        mutation.mutate({
-          fn: () => documentsApi.approveForward(document.id, c || undefined),
-          message: 'Approve-forward recorded',
-        });
+        approveAndForwardMutation.mutate(c);
         break;
       case 'finalApprove':
-        mutation.mutate({
-          fn: () => documentsApi.finalApprove(document.id, c || undefined),
-          message: 'Document approved',
-        });
+        finalApproveAndAdvanceMutation.mutate(c);
+        break;
+      case 'reviewForward':
+        reviewForwardMutation.mutate(c);
         break;
       default:
         break;
@@ -153,67 +299,55 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
   > = {
     reject: {
       title: 'Reject document',
-      description: 'Provide a reason for rejection. The document will move to rejected status.',
+      description:
+        'Provide a reason for rejection. The document will move to rejected status. When this memo has an active workflow beyond step 1, the workflow also moves back one step so the previous participant is notified.',
       placeholder: 'Rejection reason…',
     },
     requestInfo: {
       title: 'Request more information',
-      description: 'Explain what additional information is needed. Status stays pending.',
+      description:
+        'Explain what additional information is needed. Status stays pending. When there is an active workflow beyond step 1, it moves back one step so the previous participant can respond.',
       placeholder: 'What information is needed…',
     },
-    editForward: {
-      title: 'Edit forward',
-      description: 'Record an edit-forward step (optional note). Status unchanged unless updated separately.',
-      placeholder: 'Optional note…',
-    },
     approveForward: {
-      title: 'Approve forward',
-      description: 'Record approval to forward along the chain (optional note). Status stays pending until final approval.',
+      title: 'Approve and forward',
+      description:
+        'Records approval, appends your e-signature to the document body (requires signature in Settings), and advances the workflow to the next step when applicable. Optional note.',
       placeholder: 'Optional note…',
     },
     finalApprove: {
       title: 'Final approval',
       description:
-        'Official approval with signature eligibility checked on the server (active signatory required). Optional note.',
+        'Files the document to the organisation registry (archived). No signature is appended — signatures are added when using Approve and forward on earlier steps. Optional note is stored on the action record.',
+      placeholder: 'Optional note…',
+    },
+    reviewForward: {
+      title: 'Forward',
+      description:
+        'Move this case to the next role in the workflow chain. Optional note is stored on the workflow advance record.',
       placeholder: 'Optional note…',
     },
   };
-
-  const advanceMutation = useMutation({
-    mutationFn: () => workflowApi.advance(workflowAdvance!.workflowInstanceId),
-    onSuccess: (data) => {
-      if (data.workflow.status === 'completed') {
-        toast.success('Workflow completed — this was the final step.');
-      } else {
-        toast.success('Workflow advanced to the next step');
-      }
-      if (data.warnings?.length) {
-        toast.warning('Workflow moved, but some notifications or tasks could not be updated.');
-      }
-      invalidateDoc();
-      queryClient.invalidateQueries({
-        predicate: (q) =>
-          Array.isArray(q.queryKey) &&
-          q.queryKey[0] === 'workflow-bpmn-view' &&
-          q.queryKey[1] === data.workflow.id,
-      });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowSteps(data.workflow.id) });
-      setPendingConfirm(null);
-    },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
 
   const anyPrimaryButton =
     actions.canSubmit ||
     actions.canFinalApprove ||
     actions.canReject ||
     actions.canArchive ||
-    actions.canEditForward ||
-    actions.canApproveForward ||
-    actions.canRequestInfo ||
-    !!workflowAdvance;
+    showApproveAndForward ||
+    showReviewForward ||
+    actions.canRequestInfo;
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
+
+  const dialogLoading =
+    commentDialog === 'approveForward'
+      ? approveAndForwardMutation.isPending
+      : commentDialog === 'finalApprove'
+        ? finalApproveAndAdvanceMutation.isPending
+        : commentDialog === 'reviewForward'
+          ? reviewForwardMutation.isPending
+          : mutation.isPending;
 
   return (
     <>
@@ -234,22 +368,16 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
             Submit for review
           </Button>
         )}
-        {workflowAdvance && (
-          <Button variant="default" size="sm" onClick={() => setPendingConfirm('advanceWorkflow')}>
-            <StepForward className="h-4 w-4" />
-            Forward workflow
-          </Button>
-        )}
-        {actions.canEditForward && (
-          <Button variant="outline" size="sm" onClick={() => openCommentDialog('editForward')}>
+        {showReviewForward && (
+          <Button variant="default" size="sm" onClick={() => openCommentDialog('reviewForward')}>
             <Forward className="h-4 w-4" />
-            Edit forward
+            Forward
           </Button>
         )}
-        {actions.canApproveForward && (
-          <Button variant="outline" size="sm" onClick={() => openCommentDialog('approveForward')}>
+        {showApproveAndForward && (
+          <Button variant="default" size="sm" onClick={() => openCommentDialog('approveForward')}>
             <Forward className="h-4 w-4 rotate-[-45deg]" />
-            Approve forward
+            Approve and forward
           </Button>
         )}
         {actions.canRequestInfo && (
@@ -330,19 +458,6 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
         />
       )}
 
-      {pendingConfirm === 'advanceWorkflow' && workflowAdvance && (
-        <ConfirmDialog
-          open
-          onOpenChange={(open) => !open && setPendingConfirm(null)}
-          title="Forward workflow"
-          description="Mark your current workflow step as done and move the case to the next role in the chain. If this is the last step, the workflow completes."
-          confirmLabel="Forward"
-          variant="default"
-          onConfirm={() => advanceMutation.mutate()}
-          loading={advanceMutation.isPending}
-        />
-      )}
-
       <Dialog open={!!commentDialog} onOpenChange={(o) => !o && setCommentDialog(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -364,14 +479,18 @@ export function DocumentActions({ document, roles, actionContext, workflowAdvanc
             </Button>
             <Button
               onClick={handleCommentConfirm}
-              loading={mutation.isPending}
+              loading={dialogLoading}
               variant={commentDialog === 'reject' ? 'destructive' : 'default'}
               disabled={commentRequired && !comment.trim()}
             >
               {commentDialog === 'finalApprove' ? (
                 <>
-                  <CheckCircle className="h-4 w-4" /> Approve
+                  <CheckCircle className="h-4 w-4" /> Final approve
                 </>
+              ) : commentDialog === 'approveForward' ? (
+                'Approve and forward'
+              ) : commentDialog === 'reviewForward' ? (
+                'Forward'
               ) : (
                 'Confirm'
               )}

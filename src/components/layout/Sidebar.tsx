@@ -14,7 +14,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { canAccessTemplateManagement } from '@/utils/permissions';
+import { canAccessTemplateManagement, canAccessAuditLogModule } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { formatAuthRolesForDisplay } from '@/utils/workflowEditor';
 import { useNotificationStore } from '@/stores/notificationStore';
@@ -25,10 +25,10 @@ const navItems = [
   { to: '/documents', icon: FileText, label: 'Documents' },
   { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
-  { to: '/audit', icon: Shield, label: 'Audit Log' },
+  { to: '/audit', icon: Shield, label: 'Audit Log', requiresAuditAccess: true },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true },
   { to: '/search', icon: Search, label: 'Search & OCR' },
-];
+] as const;
 
 const adminNavItems = [
   { to: '/admin/users', icon: Users, label: 'User Management' },
@@ -45,6 +45,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const isAdmin = user?.roles.includes('admin') ?? false;
   const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
+  const showAuditNav = canAccessAuditLogModule(user?.roles);
 
   return (
     <aside
@@ -79,7 +80,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1 scrollbar-none">
-        {navItems.map(({ to, icon: Icon, label, badge }) => {
+        {navItems
+          .filter((item) => !('requiresAuditAccess' in item && item.requiresAuditAccess) || showAuditNav)
+          .map(({ to, icon: Icon, label, badge }) => {
           const path = location.pathname;
           const isActive =
             to === '/documents'
