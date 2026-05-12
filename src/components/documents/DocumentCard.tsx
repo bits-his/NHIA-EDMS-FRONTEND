@@ -6,11 +6,7 @@ import { formatRelative, truncate } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { cn } from '@/utils/cn';
 import type { Document } from '@/types/document';
-
-const CATEGORY_LABEL: Record<string, string> = {
-  internal_memo: 'Internal',
-  external_correspondence: 'External',
-};
+import { documentTypeHeadline, shouldShowTemplateTitleAsSubtitle, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
 
 interface DocumentCardProps {
   document: Document;
@@ -47,9 +43,16 @@ export function DocumentCard({ document }: DocumentCardProps) {
             )}>
               <FileText className={cn('h-4 w-4', isPending ? 'text-amber-600 dark:text-amber-400' : 'text-primary')} />
             </div>
-            <h3 className="font-semibold text-sm text-foreground truncate group-hover:text-primary transition-colors leading-snug">
-              {document.title}
-            </h3>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-sm text-foreground truncate group-hover:text-primary transition-colors leading-snug">
+                {documentTypeHeadline(document)}
+              </h3>
+              {shouldShowTemplateTitleAsSubtitle(document) && (
+                <p className="text-xs text-muted-foreground truncate mt-0.5" title={document.title}>
+                  {document.title}
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
             <DocumentStatusBadge status={document.status} size="sm" />
@@ -59,18 +62,22 @@ export function DocumentCard({ document }: DocumentCardProps) {
                   {document.ref_number}
                 </Badge>
               )}
-              {document.category && (
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
-                  {CATEGORY_LABEL[document.category] ?? document.category}
-                </Badge>
-              )}
             </div>
           </div>
         </div>
 
         {document.content ? (
           <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed mb-4">
-            {truncate(document.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(), 130)}
+            {truncate(
+              (shouldShowTemplateTitleAsSubtitle(document)
+                ? stripFirstHtmlBlockMatchingTitle(document.content, document.title)
+                : document.content
+              )
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+              130
+            )}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground/50 italic mb-4">No content</p>

@@ -65,6 +65,11 @@ import {
   getWorkflowStepDefinitionForInstance,
 } from '@/utils/workflowStageLabel';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
+import {
+  documentTypeHeadline,
+  shouldShowTemplateTitleAsSubtitle,
+  stripFirstHtmlBlockMatchingTitle,
+} from '@/utils/documentDisplay';
 import type { RecipientType } from '@/types/document';
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -355,8 +360,13 @@ export default function DocumentDetailPage() {
               </div>
               <div className="min-w-0">
                 <h1 className="text-xl font-bold tracking-tight text-foreground leading-tight">
-                  {doc.title}
+                  {documentTypeHeadline(doc)}
                 </h1>
+                {shouldShowTemplateTitleAsSubtitle(doc) && (
+                  <p className="text-sm text-muted-foreground truncate mt-1" title={doc.title}>
+                    {doc.title}
+                  </p>
+                )}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <DocumentStatusBadge status={doc.status} pendingStageLabel={pendingStageLabel} />
                   {doc.category && (
@@ -559,14 +569,19 @@ export default function DocumentDetailPage() {
                     doc.category === 'internal_memo' ? (
                       <div className="rounded-lg border border-border/60 bg-white shadow-sm overflow-hidden">
                         <NhiaMemoLetterhead
-                          documentTypeLabel={docTemplate?.name}
+                          documentTypeLabel={documentTypeHeadline(doc)}
                           zoneCode={docTemplate?.metadata?.zone}
                           stateOfficeName={docTemplate?.metadata?.state_office}
                           zones={orgScope?.zones}
                         />
                         <div
                           className="prose prose-sm max-w-none px-8 py-4 border-t border-border/40 text-foreground"
-                          dangerouslySetInnerHTML={{ __html: doc.content }}
+                          dangerouslySetInnerHTML={{
+                            __html:
+                              shouldShowTemplateTitleAsSubtitle(doc)
+                                ? stripFirstHtmlBlockMatchingTitle(doc.content, doc.title)
+                                : doc.content,
+                          }}
                         />
                         {doc.signatory_id && signatorySignatureObjectUrl ? (
                           <div className="border-t border-border/60 bg-white px-8 py-6">
@@ -584,7 +599,12 @@ export default function DocumentDetailPage() {
                     ) : (
                       <div
                         className="prose prose-sm max-w-none bg-muted/30 rounded-lg border border-border/50 p-4 text-foreground"
-                        dangerouslySetInnerHTML={{ __html: doc.content }}
+                        dangerouslySetInnerHTML={{
+                          __html:
+                            shouldShowTemplateTitleAsSubtitle(doc)
+                              ? stripFirstHtmlBlockMatchingTitle(doc.content, doc.title)
+                              : doc.content,
+                        }}
                       />
                     )
                   ) : (

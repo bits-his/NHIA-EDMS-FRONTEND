@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { CheckSquare, Clock, AlertCircle, FileText, ArrowRight } from 'lucide-react';
+import { CheckSquare, Clock, AlertCircle, FileText, ArrowRight, Hash } from 'lucide-react';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
@@ -13,6 +13,7 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { formatRelative, isOverdue } from '@/utils/formatters';
 import type { TaskStatus, Task } from '@/types/task';
 import { cn } from '@/utils/cn';
+import { documentTypeHeadline } from '@/utils/documentDisplay';
 
 const FILTER_TABS: { value: TaskStatus | 'all'; label: string }[] = [
   { value: 'all',         label: 'All' },
@@ -127,10 +128,18 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
         </div>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-            {document ? document.title : `Step ${task.step_number} — Review Task`}
+            {document ? documentTypeHeadline(document) : `Step ${task.step_number} — Review Task`}
           </p>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted-foreground">Step {task.step_number}</span>
+            {document?.ref_number && (
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="text-xs font-mono text-muted-foreground inline-flex items-center gap-0.5">
+                  <Hash className="h-3 w-3" /> {document.ref_number}
+                </span>
+              </>
+            )}
             {document && (
               <>
                 <span className="text-muted-foreground/30">·</span>

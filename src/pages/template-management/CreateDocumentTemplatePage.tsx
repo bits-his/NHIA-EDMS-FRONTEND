@@ -39,9 +39,7 @@ import {
 } from '@/components/ui/select';
 import { PageHeader } from '@/components/shared/PageHeader';
 import MemoEditor from '@/components/documents/MemoEditor';
-import { EnterprisePageBanner } from '@/components/template-builder/EnterprisePageBanner';
 import { CollapsibleSection } from '@/components/template-builder/CollapsibleSection';
-import { TemplateMetricsStrip } from '@/components/template-builder/TemplateMetricsStrip';
 import { TemplateDocumentTypeSelect } from '@/components/template-builder/TemplateDocumentTypeSelect';
 import { TemplatePreviewPanel } from '@/components/template-builder/TemplatePreviewPanel';
 import {
@@ -481,25 +479,6 @@ export default function CreateDocumentTemplatePage() {
           {templateId ? 'Edit template' : 'Create template'}
         </span>
       </nav>
-
-      <EnterprisePageBanner environment={environment} />
-
-      <PageHeader
-        title={templateId ? 'Edit document template' : 'Create document template'}
-        description="Configure reusable letterhead and body content. Save drafts or publish to the catalogue — data is stored on the document service."
-        actions={
-          <div className="flex flex-wrap gap-2 justify-end">
-            <Badge variant="outline" className="text-[10px] font-normal">
-              API-ready schema
-            </Badge>
-            <Badge variant="secondary" className="text-[10px]">
-              Records management
-            </Badge>
-          </div>
-        }
-      />
-
-      <TemplateMetricsStrip />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         <div className="xl:col-span-8 space-y-4">
