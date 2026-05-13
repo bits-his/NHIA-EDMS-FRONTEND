@@ -25,79 +25,11 @@ import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { useAuthStore } from '@/stores/authStore';
 import type { DocumentUrgency } from '@/types/document';
 import type { UserRecord } from '@/api/auth';
-import type { Role } from '@/types/auth';
-
-/** Human label for a grade / RBAC role (same idea as Users admin). */
-function roleDisplayLabel(role: Pick<Role, 'name' | 'description'>): string {
-  const d = role.description?.trim();
-  if (d) return d;
-  return role.name.replace(/_/g, ' ');
-}
-
-/** Grade ladder roles — `level` from auth API; high → low. */
-function gradeRolesSorted(all: Role[] | undefined): Role[] {
-  if (!all?.length) return [];
-  return [...all]
-    .filter((r) => r.level != null && typeof r.level === 'number')
-    .sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
-}
-
-function normRank(s: string | null | undefined): string {
-  return (s || '').trim().toLowerCase();
-}
-
-function userMatchesGradeRole(u: UserRecord, role: Role): boolean {
-  const ur = normRank(u.rank);
-  if (!ur) return false;
-  const desc = normRank(role.description);
-  const nameHuman = normRank(role.name.replace(/_/g, ' '));
-  const nameRaw = normRank(role.name);
-  return ur === desc || ur === nameHuman || ur === nameRaw;
-}
-
-function userMatchesRankFilter(u: UserRecord, rankFilter: string): boolean {
-  if (!rankFilter.trim()) return true;
-  const ur = normRank(u.rank);
-  return ur === normRank(rankFilter);
-}
-
-type RankFilterOption = { value: string; label: string };
-
-/** Rank options that actually appear on at least one recipient user; grade order first, then other rank strings. */
-function buildRankFilterOptions(users: UserRecord[], roles: Role[] | undefined): RankFilterOption[] {
-  const graded = gradeRolesSorted(roles);
-  const seenNorm = new Set<string>();
-  const ordered: RankFilterOption[] = [];
-
-  for (const r of graded) {
-    const value = r.description?.trim() || roleDisplayLabel(r);
-    const key = normRank(value);
-    if (seenNorm.has(key)) continue;
-    if (!users.some((u) => userMatchesGradeRole(u, r))) continue;
-    seenNorm.add(key);
-    ordered.push({ value, label: roleDisplayLabel(r) });
-  }
-
-  const extras: RankFilterOption[] = [];
-  for (const u of users) {
-    const rr = u.rank?.trim();
-    if (!rr) continue;
-    const key = normRank(rr);
-    if (seenNorm.has(key)) continue;
-    seenNorm.add(key);
-    extras.push({ value: rr, label: rr });
-  }
-  extras.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-
-  return [...ordered, ...extras];
-}
-
-function recipientUserLabel(u: UserRecord): string {
-  const name = u.full_name?.trim() || u.username;
-  const rank = u.rank?.trim() || '—';
-  const dept = u.department?.trim() || '—';
-  return `${name} — ${rank}, ${dept}`;
-}
+import {
+  buildRankFilterOptions,
+  recipientUserLabel,
+  userMatchesRankFilter,
+} from '@/utils/recipientPicker';
 
 const documentTypeSchema = z.enum(['internal', 'external']);
 const fileCategorySchema = z.enum(['secret', 'top_secret', 'important', 'normal']);
@@ -310,8 +242,8 @@ export default function CreateDocumentPage() {
     if (!selectedRecipientRank?.trim()) {
       return selectedAction === 'send' ? [] : recipientUsers;
     }
-    return recipientUsers.filter((u) => userMatchesRankFilter(u, selectedRecipientRank));
-  }, [recipientUsers, selectedRecipientRank, selectedAction]);
+    return recipientUsers.filter((u) => userMatchesRankFilter(u, selectedRecipientRank, roles));
+  }, [recipientUsers, selectedRecipientRank, selectedAction, roles]);
 
   const lastAppliedDocumentTemplateId = useRef<string | null>(null);
   const prevDocumentSource = useRef(documentSource);
@@ -404,11 +336,13 @@ export default function CreateDocumentPage() {
           data.delivery_mode === 'workflow' ? data.workflow_template_id?.trim() || undefined : undefined,
       };
 
-      const shouldSubmitToWorkflow = useWorkflow && data.action === 'send';
+      /** Send to pending for review: workflow path starts a template; direct message notifies recipient only (no workflow). */
+      const shouldSubmitForReview = data.action === 'send' && (useWorkflow || data.delivery_mode === 'direct_message');
 
-      const finalizeWorkflow = async (docId: string) => {
-        if (!shouldSubmitToWorkflow) return;
+      const finalizeAfterCreate = async (docId: string) => {
+        if (!shouldSubmitForReview) return;
         await documentsApi.submit(docId);
+        if (!useWorkflow) return;
         const wfTpl = data.workflow_template_id?.trim();
         if (!wfTpl) throw new Error('Select a workflow.');
         const existing = await workflowApi.getInstanceByDocumentId(docId);
@@ -434,7 +368,7 @@ export default function CreateDocumentPage() {
           if (uploadFile) {
             await documentsApi.uploadAttachment(docId, uploadFile);
           }
-          await finalizeWorkflow(docId);
+          await finalizeAfterCreate(docId);
           return docId;
         }
 
@@ -458,7 +392,7 @@ export default function CreateDocumentPage() {
         if (uploadFile) {
           await documentsApi.uploadAttachment(docId, uploadFile);
         }
-        await finalizeWorkflow(docId);
+        await finalizeAfterCreate(docId);
         return docId;
       }
 
@@ -483,7 +417,7 @@ export default function CreateDocumentPage() {
           content: `<p>${notes.replace(/\n/g, '<br/>')}</p>`,
         });
       }
-      await finalizeWorkflow(docId);
+      await finalizeAfterCreate(docId);
       return docId;
     },
     onSuccess: (docId) => {
@@ -493,7 +427,7 @@ export default function CreateDocumentPage() {
       } else if (data.delivery_mode === 'workflow' && data.action === 'draft') {
         toast.success('Draft saved (workflow not started)');
       } else if (data.delivery_mode === 'direct_message' && data.action === 'send') {
-        toast.success('Document created for your recipient (workflow not used)');
+        toast.success('Document sent to your recipient for comments (no workflow)');
       } else {
         toast.success('Draft saved');
       }
@@ -1048,8 +982,9 @@ export default function CreateDocumentPage() {
                     )}
                     {!rankFilterOptions.length && recipientUsers.length > 0 && (
                       <p className="text-xs text-muted-foreground">
-                        Directory users have no rank set. Ask an admin to set rank on profiles, or use draft and pick
-                        from the full list.
+                        No rank or role could be derived for directory users (missing profile rank and role
+                        assignments). Ask an admin to set rank or roles on user profiles, or save as draft and pick from
+                        the full list.
                       </p>
                     )}
                   </div>
@@ -1093,7 +1028,7 @@ export default function CreateDocumentPage() {
                       <SelectItem value="__none__">Select user</SelectItem>
                       {filteredRecipientUsers.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
-                          {recipientUserLabel(u)}
+                          {recipientUserLabel(u, roles)}
                         </SelectItem>
                       ))}
                     </SelectContent>

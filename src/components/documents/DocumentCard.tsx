@@ -55,7 +55,7 @@ export function DocumentCard({ document }: DocumentCardProps) {
             </div>
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
-            <DocumentStatusBadge status={document.status} size="sm" />
+            <DocumentStatusBadge status={document.status} statusLabel={document.status_label} size="sm" />
             <div className="flex flex-wrap gap-1 justify-end">
               {document.ref_number && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono font-normal">

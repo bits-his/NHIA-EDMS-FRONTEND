@@ -442,7 +442,7 @@ function Operational360Dashboard() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <DocumentStatusBadge status={doc.status} size="sm" />
+                          <DocumentStatusBadge status={doc.status} statusLabel={doc.status_label} size="sm" />
                           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
                         </div>
                       </div>
@@ -801,7 +801,7 @@ function OfficerDashboard() {
                         <p className="text-sm font-medium truncate">{doc.title}</p>
                         <p className="text-xs text-muted-foreground">{formatRelative(doc.updated_at)}</p>
                       </div>
-                      <DocumentStatusBadge status={doc.status} size="sm" />
+                      <DocumentStatusBadge status={doc.status} statusLabel={doc.status_label} size="sm" />
                     </div>
                   ))}
               </CardContent>

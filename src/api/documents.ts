@@ -184,9 +184,16 @@ export const documentsApi = {
     return res.data;
   },
 
-  editForward: async (id: string, comment?: string): Promise<Document> => {
+  editForward: async (
+    id: string,
+    comment?: string,
+    actionType?: string,
+    nextUserId?: string
+  ): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/edit-forward`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
+      ...(actionType !== undefined && actionType !== '' ? { action_type: actionType } : {}),
+      ...(nextUserId !== undefined && nextUserId !== '' ? { next_user_id: nextUserId } : {}),
     });
     return res.data;
   },

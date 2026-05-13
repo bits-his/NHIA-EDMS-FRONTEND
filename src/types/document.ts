@@ -32,6 +32,8 @@ export interface Document {
   title: string;
   content?: string | null;
   status: DocumentStatus;
+  /** Human workflow/location label for pending documents, e.g. "Awaiting Director HRM review". */
+  status_label?: string | null;
   owner_id: string | null;
   created_at: string;
   updated_at: string;
@@ -98,6 +100,10 @@ export interface DocumentWorkflowAction {
   actor_department?: string | null;
   actor_zone?: string | null;
   actor_state?: string | null;
+  /** RBAC role description (e.g. "Director HRM") for the actor — fallback when `actor_rank` is empty. */
+  actor_role_description?: string | null;
+  /** RBAC role machine name — last-resort fallback for the actor title. */
+  actor_role_name?: string | null;
 }
 
 export interface CreateDocumentRequest extends Partial<DocumentCreationProfile> {

@@ -84,6 +84,11 @@ export const QUERY_KEYS = {
   documentsSearch: (filters: object) => ['documents-search', filters],
   documentWorkflowActions: (id: string) => ['document-workflow-actions', id],
   documentSignatorySignature: (id: string) => ['document-signatory-signature', id],
+  documentDiscussions: (id: string) => ['document-discussions', id] as const,
+  documentDiscussionEligible: (id: string) =>
+    ['document-discussion-eligible', id] as const,
+  documentDiscussionMessages: (id: string, threadId: string) =>
+    ['document-discussion-messages', id, threadId] as const,
   workflowInstanceByDocument: (documentId: string) => ['workflow-instance-by-document', documentId],
   workflowBpmnView: (workflowInstanceId: string, documentStatus?: string) => [
     'workflow-bpmn-view',

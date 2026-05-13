@@ -7,9 +7,11 @@ interface StatusBadgeProps {
   size?: 'sm' | 'md';
   /** For `pending` documents: e.g. `Awaiting Director review` or `Awaiting final approval`. */
   pendingStageLabel?: string | null;
+  /** Backend-computed location label for pending docs across list/detail/dashboard views. */
+  statusLabel?: string | null;
 }
 
-export function DocumentStatusBadge({ status, size = 'md', pendingStageLabel }: StatusBadgeProps) {
+export function DocumentStatusBadge({ status, size = 'md', pendingStageLabel, statusLabel }: StatusBadgeProps) {
   const config = DOCUMENT_STATUS_CONFIG[status] ?? {
     label: status,
     color: 'text-muted-foreground',
@@ -17,9 +19,9 @@ export function DocumentStatusBadge({ status, size = 'md', pendingStageLabel }: 
     dot: 'bg-muted-foreground',
   };
 
-  const label =
-    status === 'pending' && pendingStageLabel?.trim() ? pendingStageLabel.trim() : config.label;
-  const truncate = Boolean(status === 'pending' && pendingStageLabel?.trim());
+  const pendingLabel = pendingStageLabel?.trim() || statusLabel?.trim();
+  const label = status === 'pending' && pendingLabel ? pendingLabel : config.label;
+  const truncate = Boolean(status === 'pending' && pendingLabel);
 
   return (
     <span

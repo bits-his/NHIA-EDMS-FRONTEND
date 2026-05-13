@@ -48,6 +48,8 @@ interface DocumentActionsProps {
   /** Current linear workflow step (1-based); used to step back after reject / request-info. */
   workflowCurrentStep?: number | null;
   workflowStepActionType?: string | null;
+  /** Hide workflow submit controls when the inline comment composer owns that action. */
+  suppressWorkflowStepActions?: boolean;
 }
 
 type ConfirmActionType = 'submit' | 'archive';
@@ -57,7 +59,8 @@ type CommentDialogKind =
   | 'requestInfo'
   | 'approveForward'
   | 'finalApprove'
-  | 'reviewForward';
+  | 'reviewForward'
+  | 'directMessageComment';
 
 export function DocumentActions({
   document,
@@ -67,6 +70,7 @@ export function DocumentActions({
   canAdvanceWorkflow = false,
   workflowCurrentStep,
   workflowStepActionType,
+  suppressWorkflowStepActions = false,
 }: DocumentActionsProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -80,9 +84,13 @@ export function DocumentActions({
   const at = normalizeWorkflowStepActionType(workflowStepActionType);
 
   const showApproveAndForward =
-    actions.canApproveForward && at !== 'review' && at !== 'final_approve';
+    !suppressWorkflowStepActions &&
+    actions.canApproveForward &&
+    at !== 'review' &&
+    at !== 'final_approve';
 
   const showReviewForward =
+    !suppressWorkflowStepActions &&
     at === 'review' &&
     Boolean(workflowInstanceId) &&
     canAdvanceWorkflow &&
@@ -286,6 +294,12 @@ export function DocumentActions({
       case 'reviewForward':
         reviewForwardMutation.mutate(c);
         break;
+      case 'directMessageComment':
+        mutation.mutate({
+          fn: () => documentsApi.editForward(document.id, c.trim() || undefined),
+          message: c.trim() ? 'Comment added' : 'Comment recorded',
+        });
+        break;
       default:
         break;
     }
@@ -327,16 +341,24 @@ export function DocumentActions({
         'Move this case to the next role in the workflow chain. Optional note is stored on the workflow advance record.',
       placeholder: 'Optional note…',
     },
+    directMessageComment: {
+      title: 'Add comment',
+      description:
+        'Adds an entry to the document activity timeline. Optional for short notes; use Request info when you need a formal response from the sender.',
+      placeholder: 'Your comment…',
+    },
   };
 
   const anyPrimaryButton =
     actions.canSubmit ||
-    actions.canFinalApprove ||
+    (!suppressWorkflowStepActions && actions.canFinalApprove) ||
     actions.canReject ||
     actions.canArchive ||
     showApproveAndForward ||
     showReviewForward ||
-    actions.canRequestInfo;
+    actions.canRequestInfo ||
+    (!suppressWorkflowStepActions && actions.canEditForward) ||
+    actions.canApproveDirectMessage;
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
 
@@ -386,16 +408,38 @@ export function DocumentActions({
             Request info
           </Button>
         )}
+        {!suppressWorkflowStepActions && actions.canEditForward && (
+          <Button variant="outline" size="sm" onClick={() => openCommentDialog('directMessageComment')}>
+            <MessageSquareWarning className="h-4 w-4" />
+            Add comment
+          </Button>
+        )}
         {actions.canReject && (
           <Button variant="destructive" size="sm" onClick={() => openCommentDialog('reject')}>
             <XCircle className="h-4 w-4" />
             Reject
           </Button>
         )}
-        {actions.canFinalApprove && (
+        {!suppressWorkflowStepActions && actions.canFinalApprove && (
           <Button variant="default" size="sm" onClick={() => openCommentDialog('finalApprove')}>
             <ShieldCheck className="h-4 w-4" />
             Final approve
+          </Button>
+        )}
+        {actions.canApproveDirectMessage && (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() =>
+              mutation.mutate({
+                fn: () => documentsApi.approve(document.id),
+                message: 'Document marked reviewed (approved)',
+              })
+            }
+            loading={mutation.isPending}
+          >
+            <CheckCircle className="h-4 w-4" />
+            Mark reviewed
           </Button>
         )}
         {actions.canArchive && (
@@ -495,6 +539,8 @@ export function DocumentActions({
                 'Approve and forward'
               ) : commentDialog === 'reviewForward' ? (
                 'Forward'
+              ) : commentDialog === 'directMessageComment' ? (
+                'Post comment'
               ) : (
                 'Confirm'
               )}

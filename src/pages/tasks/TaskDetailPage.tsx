@@ -254,7 +254,11 @@ export default function TaskDetailPage() {
                         </span>
                       </div>
                     </div>
-                    <DocumentStatusBadge status={document.status} pendingStageLabel={pendingStageLabel} />
+                    <DocumentStatusBadge
+                      status={document.status}
+                      pendingStageLabel={pendingStageLabel}
+                      statusLabel={document.status_label}
+                    />
                   </div>
 
                   {document.content && (

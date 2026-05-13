@@ -8,7 +8,7 @@ import {
   FileText,
   Shield,
   Hash,
-  Eye,
+  FileDown,
   Users,
   Paperclip,
   Building2,
@@ -22,7 +22,6 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
@@ -45,12 +44,13 @@ import { Skeleton } from '@/components/shared/Skeleton';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { DocumentActions } from '@/components/documents/DocumentActions';
 import { DocumentActivitySidebar } from '@/components/documents/DocumentActivitySidebar';
+import { DocumentCommentsSection } from '@/components/documents/DocumentCommentsSection';
+import { DocumentDiscussionsPanel } from '@/components/documents/DocumentDiscussionsPanel';
 import { WorkflowBpmnPanel } from '@/components/documents/WorkflowBpmnPanel';
-import { VersionHistory } from '@/components/documents/VersionHistory';
 import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { documentsApi } from '@/api/documents';
 import { auditApi } from '@/api/audit';
-import { authApi } from '@/api/auth';
+import { authApi, type UserRecord } from '@/api/auth';
 import { tasksApi } from '@/api/tasks';
 import { workflowApi } from '@/api/workflow';
 import { useAuthStore } from '@/stores/authStore';
@@ -64,18 +64,58 @@ import {
   getPendingDocumentWorkflowStageLabel,
   getWorkflowStepDefinitionForInstance,
 } from '@/utils/workflowStageLabel';
+import { getDocumentActions } from '@/utils/permissions';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
-import {
-  documentTypeHeadline,
-  shouldShowTemplateTitleAsSubtitle,
-  stripFirstHtmlBlockMatchingTitle,
-} from '@/utils/documentDisplay';
+import { documentTypeHeadline, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
+import { buildDocumentExportHtml } from '@/utils/documentExport';
+import { roleDisplayLabel } from '@/utils/recipientPicker';
 import type { RecipientType } from '@/types/document';
+import type { Role } from '@/types/auth';
 
 const CATEGORY_LABEL: Record<string, string> = {
   internal_memo: 'Internal memo',
   external_correspondence: 'External correspondence',
 };
+
+const URGENCY_LABEL: Record<string, string> = {
+  normal: 'Normal',
+  urgent: 'Urgent',
+  very_urgent: 'Very urgent',
+};
+
+const CLASSIFICATION_LABEL: Record<string, string> = {
+  normal: 'Normal',
+  important: 'Important',
+  secret: 'Secret',
+  top_secret: 'Top secret',
+};
+
+const DELIVERY_LABEL: Record<string, string> = {
+  workflow: 'Workflow',
+  direct_message: 'Direct message',
+};
+
+const RECIPIENT_TYPE_TONE: Record<string, string> = {
+  to: 'bg-primary/10 text-primary',
+  cc: 'bg-muted text-muted-foreground',
+  bcc: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
+};
+
+function userDisplayName(profile: UserRecord | undefined, fallback: string): string {
+  return profile?.full_name?.trim() || profile?.username?.trim() || fallback;
+}
+
+function userRoleContext(profile: UserRecord | undefined, roles: Role[] | undefined): string {
+  if (!profile) return '';
+  const rank =
+    profile.rank?.trim() ||
+    profile.roles
+      ?.map((r) => roleDisplayLabel(roles?.find((x) => x.id === r.id) ?? r))
+      .filter(Boolean)
+      .join(', ');
+  const parts = [rank, profile.department?.trim()].filter(Boolean);
+  return parts.join(', ');
+}
 
 export default function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -140,10 +180,14 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid && doc?.status === 'pending',
   });
 
+  /** Workflow template name — fetched whenever the doc carries a workflow selection, regardless of status. */
+  const workflowTemplateLookupId =
+    wfInstance?.template_id || doc?.selected_workflow_template_id || null;
+
   const { data: wfTemplate } = useQuery({
-    queryKey: QUERY_KEYS.workflowTemplate(wfInstance?.template_id ?? ''),
-    queryFn: () => workflowApi.getTemplateById(wfInstance!.template_id),
-    enabled: !!wfInstance?.template_id,
+    queryKey: QUERY_KEYS.workflowTemplate(workflowTemplateLookupId ?? ''),
+    queryFn: () => workflowApi.getTemplateById(workflowTemplateLookupId!),
+    enabled: !!workflowTemplateLookupId,
   });
 
   const hasActiveWorkflowTaskForDoc = useMemo(
@@ -218,6 +262,22 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid,
   });
 
+  const currentDirectMessageRecipientId = useMemo(() => {
+    if (doc?.delivery_mode !== 'direct_message' || !recipients?.length) return null;
+    const sorted = [...recipients].sort((a, b) => {
+      const ta = new Date(a.created_at ?? '').getTime();
+      const tb = new Date(b.created_at ?? '').getTime();
+      return tb - ta;
+    });
+    return sorted[0]?.user_id ?? null;
+  }, [doc?.delivery_mode, recipients]);
+
+  const isDirectMessageRecipient =
+    !!user?.user_id &&
+    !!currentDirectMessageRecipientId &&
+    doc?.delivery_mode === 'direct_message' &&
+    currentDirectMessageRecipientId === user.user_id;
+
   const { data: attachments } = useQuery({
     queryKey: QUERY_KEYS.documentAttachments(id!),
     queryFn: () => documentsApi.listAttachments(id!),
@@ -233,30 +293,104 @@ export default function DocumentDetailPage() {
   const { data: users } = useQuery({
     queryKey: ['auth-users'],
     queryFn: () => authApi.listUsers(),
-    enabled: recipientOpen,
+    enabled: documentIdValid,
   });
 
-  const previewMutation = useMutation({
-    mutationFn: () => documentsApi.getPreviewHtml(id!),
+  const { data: roles } = useQuery({
+    queryKey: ['auth-roles'],
+    queryFn: () => authApi.listRoles(),
+    enabled: documentIdValid,
+  });
+
+  const userById = useMemo(() => new Map((users ?? []).map((u) => [u.id, u])), [users]);
+
+  /** Permissions context — mirror what the action toolbar uses so we can show the composer. */
+  const docActionsAvailable = useMemo(() => {
+    if (!doc) return null;
+    return getDocumentActions(
+      doc.status,
+      user?.roles ?? [],
+      {
+        permissions: user?.permissions ?? [],
+        userId: user?.user_id,
+        ownerId: doc.owner_id,
+        hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+        deliveryMode: doc.delivery_mode ?? null,
+        isDirectMessageRecipient,
+      },
+      workflowStepActionType
+    );
+  }, [
+    doc,
+    user?.roles,
+    user?.permissions,
+    user?.user_id,
+    hasActiveWorkflowTaskForDoc,
+    workflowStepActionType,
+    isDirectMessageRecipient,
+  ]);
+
+  const canPostComment = !!docActionsAvailable?.canEditForward;
+  const inlineWorkflowActionEnabled =
+    canPostComment &&
+    doc?.delivery_mode === 'workflow' &&
+    !!workflowInstanceIdForActions &&
+    canAdvanceWorkflow;
+
+  const isOwner = !!user?.user_id && !!doc?.owner_id && user.user_id === doc.owner_id;
+  const canAddRecipient = isOwner && (doc?.status === 'draft' || doc?.status === 'pending');
+  const canUploadAttachment = isOwner && (doc?.status === 'draft' || doc?.status === 'pending');
+
+  /**
+   * Build a single printable HTML view that captures EVERYTHING on the page:
+   * NHIA letterhead (when available), document body, profile metadata,
+   * recipients, attachments, comments / activity timeline, and versions.
+   * The user can print or save as PDF from the new tab's toolbar.
+   *
+   * For internal memos we fetch the server letterhead so the export keeps the
+   * official banner; otherwise we render a standalone shell that still includes
+   * the title and body, plus all of the additional sections.
+   */
+  const exportMutation = useMutation({
+    mutationFn: async (): Promise<string | null> => {
+      if (!isInternalMemo) return null;
+      try {
+        return await documentsApi.getPreviewHtml(id!);
+      } catch {
+        // Letterhead is optional — fall back to the standalone export shell.
+        return null;
+      }
+    },
   });
 
   /** Open a tab synchronously on click (user gesture), then stream HTML — avoids pop-up blockers. */
-  const openOfficialPreview = () => {
-    if (!id) return;
+  const openDocumentExport = () => {
+    if (!id || !doc) return;
     const w = window.open('about:blank', '_blank');
     if (!w) {
-      toast.error('Could not open preview. Allow pop-ups for this site and try again.');
+      toast.error('Could not open the export. Allow pop-ups for this site and try again.');
       return;
     }
-    previewMutation.mutate(undefined, {
-      onSuccess: (html) => {
+    exportMutation.mutate(undefined, {
+      onSuccess: (letterheadHtml) => {
         try {
+          const usernameFor = (uid: string | null | undefined) => resolveUsername(uid);
+          const html = buildDocumentExportHtml({
+            doc,
+            letterheadHtml,
+            recipients,
+            attachments,
+            actions: workflowActions,
+            versions,
+            ownerName: resolveUsername(doc.owner_id),
+            usernameFor,
+          });
           w.document.open();
           w.document.write(html);
           w.document.close();
         } catch {
           w.close();
-          toast.error('Preview could not be displayed. Try again or check browser restrictions.');
+          toast.error('Export could not be displayed. Try again or check browser restrictions.');
           return;
         }
         try {
@@ -338,298 +472,474 @@ export default function DocumentDetailPage() {
     );
   }
 
+  if (isLoading || !doc) {
+    return (
+      <div className="space-y-5">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
+          <ArrowLeft className="h-4 w-4" /> Documents
+        </Button>
+        <div className="space-y-3">
+          <Skeleton className="h-7 w-72" />
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  const ownerProfile = doc.owner_id ? userById.get(doc.owner_id) : undefined;
+  const ownerName = userDisplayName(ownerProfile, resolveUsername(doc.owner_id));
+  const ownerContext =
+    userRoleContext(ownerProfile, roles) || (doc.department ? doc.department.trim() : '');
+  const departmentName = doc.department || '—';
+  const urgencyLabel = URGENCY_LABEL[doc.urgency ?? 'normal'] ?? doc.urgency ?? 'Normal';
+  const deliveryLabel = doc.delivery_mode ? DELIVERY_LABEL[doc.delivery_mode] ?? doc.delivery_mode : '—';
+  const categoryLabel = doc.category ? CATEGORY_LABEL[doc.category] ?? doc.category : '—';
+  const classificationLabel = doc.file_classification
+    ? CLASSIFICATION_LABEL[doc.file_classification] ?? doc.file_classification
+    : '—';
+  const inputModeLabel = doc.input_mode
+    ? doc.input_mode === 'template'
+      ? 'Template'
+      : 'Manual entry'
+    : '—';
+  const documentDateValue = doc.document_effective_date
+    ? formatDateTime(doc.document_effective_date)
+    : '—';
+  const receivedDateValue = doc.receive_recorded_at
+    ? formatDateTime(doc.receive_recorded_at)
+    : formatDateTime(doc.created_at);
+
+  /** "<p></p>" / "<p><br></p>" / "&nbsp;" should not look like real body text. */
+  const bodyHtml = doc.content ?? '';
+  const bodyPlainText = bodyHtml
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;|\u00A0/g, ' ')
+    .trim();
+  const hasBodyText = bodyPlainText.length > 0;
+
   return (
     <div className="space-y-5">
       <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
         <ArrowLeft className="h-4 w-4" /> Documents
       </Button>
 
-      {isLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-7 w-72" />
-          <Skeleton className="h-4 w-48" />
-        </div>
-      ) : doc ? (
-        <>
-          <div className="lg:grid lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_350px] lg:gap-6 lg:items-start space-y-6 lg:space-y-0">
-            <div className="min-w-0 space-y-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 mt-0.5">
-                <FileText className="h-5 w-5 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-xl font-bold tracking-tight text-foreground leading-tight">
-                  {documentTypeHeadline(doc)}
-                </h1>
-                {shouldShowTemplateTitleAsSubtitle(doc) && (
-                  <p className="text-sm text-muted-foreground truncate mt-1" title={doc.title}>
-                    {doc.title}
-                  </p>
-                )}
-                <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <DocumentStatusBadge status={doc.status} pendingStageLabel={pendingStageLabel} />
-                  {doc.category && (
-                    <Badge variant="secondary" className="text-xs font-normal">
-                      <Tag className="h-3 w-3 mr-1" />
-                      {CATEGORY_LABEL[doc.category] ?? doc.category}
-                    </Badge>
-                  )}
-                  {doc.ref_number && (
-                    <Badge variant="outline" className="text-xs font-mono font-normal">
-                      {doc.ref_number}
-                    </Badge>
-                  )}
-                  {doc.urgency && doc.urgency !== 'normal' && (
-                    <Badge variant="outline" className="text-xs capitalize">
-                      <Zap className="h-3 w-3 mr-1" />
-                      {doc.urgency.replace('_', ' ')}
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-2 flex-wrap text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" /> {formatRelative(doc.updated_at)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <User className="h-3 w-3" />
-                    <span className="capitalize">{resolveUsername(doc.owner_id)}</span>
-                  </span>
-                  {doc.department && (
-                    <span className="flex items-center gap-1">
-                      <Building2 className="h-3 w-3" />
-                      {doc.department}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              {doc.category === 'internal_memo' && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  loading={previewMutation.isPending}
-                  onClick={openOfficialPreview}
-                >
-                  <Eye className="h-4 w-4" /> Official preview (letterhead)
-                </Button>
-              )}
-              <DocumentActions
-                document={doc}
-                roles={user?.roles ?? []}
-                actionContext={{
-                  permissions: user?.permissions ?? [],
-                  userId: user?.user_id,
-                  ownerId: doc.owner_id,
-                  hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
-                }}
-                workflowInstanceId={workflowInstanceIdForActions}
-                canAdvanceWorkflow={canAdvanceWorkflow}
-                workflowCurrentStep={wfInstance?.current_step ?? null}
-                workflowStepActionType={workflowStepActionType}
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 mt-0.5">
+            <FileText className="h-5 w-5 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {documentTypeHeadline(doc)}
+            </p>
+            <h1
+              className="text-xl font-bold tracking-tight text-foreground leading-tight mt-0.5"
+              title={doc.title || undefined}
+            >
+              {doc.title?.trim() || 'Untitled document'}
+            </h1>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <DocumentStatusBadge
+                status={doc.status}
+                pendingStageLabel={pendingStageLabel}
+                statusLabel={doc.status_label}
               />
+              {doc.category && (
+                <Badge variant="secondary" className="text-xs font-normal">
+                  <Tag className="h-3 w-3 mr-1" />
+                  {categoryLabel}
+                </Badge>
+              )}
+              {doc.ref_number && (
+                <Badge variant="outline" className="text-xs font-mono font-normal">
+                  {doc.ref_number}
+                </Badge>
+              )}
+              {doc.urgency && doc.urgency !== 'normal' && (
+                <Badge variant="outline" className="text-xs capitalize">
+                  <Zap className="h-3 w-3 mr-1" />
+                  {doc.urgency.replace('_', ' ')}
+                </Badge>
+              )}
+              {doc.delivery_mode && (
+                <Badge variant="outline" className="text-xs">
+                  {DELIVERY_LABEL[doc.delivery_mode] ?? doc.delivery_mode}
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-3 mt-2 flex-wrap text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" /> {formatRelative(doc.updated_at)}
+              </span>
+              <span className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                <span className="capitalize">{ownerName}</span>
+              </span>
+              {doc.department && (
+                <span className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3" />
+                  {doc.department}
+                </span>
+              )}
             </div>
           </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            loading={exportMutation.isPending}
+            onClick={openDocumentExport}
+          >
+            <FileDown className="h-4 w-4" /> Export document
+          </Button>
+          <DocumentActions
+            document={doc}
+            roles={user?.roles ?? []}
+            actionContext={{
+              permissions: user?.permissions ?? [],
+              userId: user?.user_id,
+              ownerId: doc.owner_id,
+              hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+              deliveryMode: doc.delivery_mode ?? null,
+              isDirectMessageRecipient,
+            }}
+            workflowInstanceId={workflowInstanceIdForActions}
+            canAdvanceWorkflow={canAdvanceWorkflow}
+            workflowCurrentStep={wfInstance?.current_step ?? null}
+            workflowStepActionType={workflowStepActionType}
+            suppressWorkflowStepActions={inlineWorkflowActionEnabled}
+          />
+        </div>
+      </div>
 
-          {/* Routing: recipients & attachments */}
-          <div className="grid lg:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Users className="h-4 w-4" /> Recipients
-                </CardTitle>
-                <Button variant="outline" size="sm" onClick={() => setRecipientOpen(true)}>
-                  Add recipient
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {!recipients?.length ? (
-                  <p className="text-sm text-muted-foreground">No recipients tagged.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {recipients.map((r) => (
-                      <li
-                        key={r.id}
-                        className="flex justify-between text-sm border border-border/60 rounded-lg px-3 py-2"
-                      >
-                        <span className="font-medium capitalize">{resolveUsername(r.user_id)}</span>
-                        <span className="text-muted-foreground uppercase text-xs">{r.recipient_type}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
+      {/* Main grid: memo card (left) + activity sidebar (right) */}
+      <div className="lg:grid lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start space-y-6 xl:space-y-0">
+        <div className="min-w-0 space-y-6">
+          <Card className="overflow-hidden border-border/80 shadow-sm">
+            {isInternalMemo && (
+              <NhiaMemoLetterhead
+                documentTypeLabel={documentTypeHeadline(doc)}
+                zoneCode={docTemplate?.metadata?.zone}
+                stateOfficeName={docTemplate?.metadata?.state_office}
+                zones={orgScope?.zones}
+              />
+            )}
 
-            <Card>
-              <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Paperclip className="h-4 w-4" /> Supporting attachments
-                </CardTitle>
-                <div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) uploadMutation.mutate(f);
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    loading={uploadMutation.isPending}
-                    onClick={() => fileInputRef.current?.click()}
+            <CardContent className="px-0 pb-6 pt-0">
+              <div className="divide-y divide-border">
+                {/* Mode & routing (mirrors the create page) */}
+                <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-mode">
+                  <h3
+                    id="section-mode"
+                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                   >
-                    <Upload className="h-4 w-4" /> Upload
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!attachments?.length ? (
-                  <p className="text-sm text-muted-foreground">No attachments.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {attachments.map((a) => (
-                      <li
-                        key={a.id}
-                        className="flex items-center justify-between gap-2 text-sm border border-border/60 rounded-lg px-3 py-2"
-                      >
-                        <span className="truncate">{a.filename}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => downloadAttachment(a.id, a.filename)}
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                    Mode &amp; routing
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ReadOnlyField label="Delivery" value={deliveryLabel} />
+                    <ReadOnlyField label="Document input" value={inputModeLabel} />
+                  </div>
+                  {doc.delivery_mode === 'workflow' && (
+                    <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2.5 text-sm">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                        Workflow
+                      </p>
+                      <p className="text-foreground">
+                        {wfTemplate?.name?.trim()
+                          ? wfTemplate.name
+                          : workflowTemplateLookupId
+                            ? 'Loading workflow template…'
+                            : 'No workflow template recorded.'}
+                      </p>
+                    </div>
+                  )}
+                  {doc.delivery_mode === 'direct_message' && (
+                    <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
+                      Direct message: tagged recipients can comment, request info or reject. The owner reviews and marks as
+                      reviewed — no workflow is started.
+                    </div>
+                  )}
+                </section>
 
-          <Tabs defaultValue="content">
-            <TabsList>
-              <TabsTrigger value="content">
-                <FileText className="h-3.5 w-3.5" /> Content
-              </TabsTrigger>
-              <TabsTrigger value="versions">
-                <Hash className="h-3.5 w-3.5" /> Versions {versions ? `(${versions.length})` : ''}
-              </TabsTrigger>
-              <TabsTrigger value="audit">
-                <Shield className="h-3.5 w-3.5" /> Audit {auditLogs ? `(${auditLogs.length})` : ''}
-              </TabsTrigger>
-              <TabsTrigger value="workflow">
-                <GitBranch className="h-3.5 w-3.5" /> Workflow
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="content">
-              <Card>
-                <CardContent className="p-5">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-                    {(
-                      [
-                        { label: 'Document ID', value: doc.id.slice(0, 8) + '…', mono: true },
-                        {
-                          label: 'Owner',
-                          value: resolveUsername(doc.owner_id),
-                          capitalize: true,
-                        },
-                        { label: 'Created', value: formatDateTime(doc.created_at) },
-                        { label: 'Updated', value: formatDateTime(doc.updated_at) },
-                      ] as { label: string; value: string; mono?: boolean; capitalize?: boolean }[]
-                    ).map((item) => (
-                      <div key={item.label}>
-                        <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
-                        <p
-                          className={`text-sm ${item.mono ? 'font-mono' : ''} ${item.capitalize ? 'capitalize' : ''}`}
-                        >
-                          {item.value}
+                {/* Document source — conditional on internal vs external + template vs manual */}
+                <section className="space-y-3 px-4 py-6 sm:px-6" aria-labelledby="section-source">
+                  <h3
+                    id="section-source"
+                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    Document source
+                  </h3>
+                  {isInternalMemo ? (
+                    doc.input_mode === 'template' ? (
+                      <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Document template
+                        </p>
+                        <p className="text-foreground">
+                          {docTemplate?.name?.trim()
+                            ? `${docTemplate.name}${docTemplate.status ? ` (${docTemplate.status})` : ''}`
+                            : templateId
+                              ? 'Loading template…'
+                              : 'No template selected.'}
                         </p>
                       </div>
-                    ))}
+                    ) : (
+                      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+                        Manual entry — no catalogue template was applied to the body.
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm space-y-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        External upload
+                      </p>
+                      <p className="text-foreground flex items-center gap-2 break-all">
+                        <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        {doc.original_filename || doc.intake_file_name || '—'}
+                      </p>
+                      {doc.intake_file_name && doc.intake_file_name !== doc.original_filename && (
+                        <p className="text-xs text-muted-foreground">
+                          Display name: <span className="font-medium text-foreground">{doc.intake_file_name}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                {/* Document profile (read-only mirror of the create-page section) */}
+                <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-profile">
+                  <h3
+                    id="section-profile"
+                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    Document profile
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ReadOnlyField label="Subject" value={doc.title?.trim() || '—'} />
+                    <ReadOnlyField label="Reference number" value={doc.ref_number || '—'} mono />
+                    <ReadOnlyField label="Document date" value={documentDateValue} />
+                    <ReadOnlyField label="Received" value={receivedDateValue} />
+                    <ReadOnlyField label="Category" value={categoryLabel} />
+                    <ReadOnlyField label="Urgency" value={urgencyLabel} />
+                    <ReadOnlyField label="Classification" value={classificationLabel} />
+                    <ReadOnlyField label="Department" value={departmentName} />
+                    <ReadOnlyField label="Owner" value={ownerName} className="capitalize" />
                   </div>
+                </section>
+
+                {/* Sender & recipients */}
+                <section className="space-y-3 px-4 py-6 sm:px-6" aria-labelledby="section-recipients">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h3
+                      id="section-recipients"
+                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
+                    >
+                      <Users className="h-3.5 w-3.5" /> Sender &amp; recipients
+                    </h3>
+                    {canAddRecipient && (
+                      <Button variant="outline" size="sm" onClick={() => setRecipientOpen(true)}>
+                        Add recipient
+                      </Button>
+                    )}
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Sender
+                      </span>
+                      <span className="font-medium capitalize">{ownerName}</span>
+                    </div>
+                    {ownerContext && (
+                      <p className="mt-1 text-xs text-muted-foreground">{ownerContext}</p>
+                    )}
+                  </div>
+                  {!recipients?.length ? (
+                    <p className="text-sm text-muted-foreground italic">
+                      {doc.delivery_mode === 'direct_message'
+                        ? 'Direct message: no recipients tagged yet.'
+                        : 'No recipients tagged.'}
+                    </p>
+                  ) : (
+                    <ul className="grid gap-2 sm:grid-cols-2">
+                      {recipients.map((r) => {
+                        const typeKey = (r.recipient_type ?? 'to').toLowerCase();
+                        const tone = RECIPIENT_TYPE_TONE[typeKey] ?? 'bg-muted text-muted-foreground';
+                        const recipientProfile = userById.get(r.user_id);
+                        const recipientName = userDisplayName(
+                          recipientProfile,
+                          resolveUsername(r.user_id)
+                        );
+                        const recipientContext = userRoleContext(recipientProfile, roles);
+                        return (
+                          <li
+                            key={r.id}
+                            className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm"
+                          >
+                            <span className="min-w-0">
+                              <span className="block font-medium capitalize truncate">
+                                {recipientName}
+                              </span>
+                              {recipientContext && (
+                                <span className="block text-xs text-muted-foreground truncate">
+                                  {recipientContext}
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${tone}`}
+                            >
+                              {r.recipient_type}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+
+                {/* Body */}
+                <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-body">
+                  <h3
+                    id="section-body"
+                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    {doc.category === 'external_correspondence' ? 'Body / notes' : 'Body'}
+                  </h3>
                   {doc.category === 'external_correspondence' && doc.original_filename && (
-                    <Alert variant="info" className="mb-5 border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
+                    <Alert variant="info" className="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
                       <FileText className="h-4 w-4" />
                       <AlertDescription>
                         Primary file: <strong>{doc.original_filename}</strong> (stored on server).
                       </AlertDescription>
                     </Alert>
                   )}
-                  <Separator className="mb-5" />
-                  {doc.content ? (
-                    doc.category === 'internal_memo' ? (
-                      <div className="rounded-lg border border-border/60 bg-white shadow-sm overflow-hidden">
-                        <NhiaMemoLetterhead
-                          documentTypeLabel={documentTypeHeadline(doc)}
-                          zoneCode={docTemplate?.metadata?.zone}
-                          stateOfficeName={docTemplate?.metadata?.state_office}
-                          zones={orgScope?.zones}
-                        />
-                        <div
-                          className="prose prose-sm max-w-none px-8 py-4 border-t border-border/40 text-foreground"
-                          dangerouslySetInnerHTML={{
-                            __html:
-                              shouldShowTemplateTitleAsSubtitle(doc)
-                                ? stripFirstHtmlBlockMatchingTitle(doc.content, doc.title)
-                                : doc.content,
-                          }}
-                        />
-                        {doc.signatory_id && signatorySignatureObjectUrl ? (
-                          <div className="border-t border-border/60 bg-white px-8 py-6">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                              Authorised signatory
-                            </p>
-                            <img
-                              src={signatorySignatureObjectUrl}
-                              alt="Signature"
-                              className="max-h-24 max-w-[280px] object-contain"
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
+                  {hasBodyText ? (
+                    <div className="rounded-lg border border-border/60 bg-background overflow-hidden">
                       <div
-                        className="prose prose-sm max-w-none bg-muted/30 rounded-lg border border-border/50 p-4 text-foreground"
+                        className="prose prose-sm max-w-none px-5 py-4 text-foreground"
                         dangerouslySetInnerHTML={{
-                          __html:
-                            shouldShowTemplateTitleAsSubtitle(doc)
-                              ? stripFirstHtmlBlockMatchingTitle(doc.content, doc.title)
-                              : doc.content,
+                          __html: doc.title?.trim()
+                            ? stripFirstHtmlBlockMatchingTitle(bodyHtml, doc.title)
+                            : bodyHtml,
                         }}
                       />
-                    )
+                      {doc.signatory_id && signatorySignatureObjectUrl ? (
+                        <div className="border-t border-border/60 bg-background px-5 py-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                            Authorised signatory
+                          </p>
+                          <img
+                            src={signatorySignatureObjectUrl}
+                            alt="Signature"
+                            className="max-h-24 max-w-[280px] object-contain"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : doc.category === 'external_correspondence' ? (
+                    <p className="text-sm text-muted-foreground italic py-2">
+                      No notes were entered. The uploaded file above is the primary content.
+                    </p>
                   ) : (
-                    <p className="text-sm text-muted-foreground italic text-center py-8">
-                      {doc.category === 'external_correspondence'
-                        ? 'Body content is stored as the uploaded file.'
-                        : 'No content'}
+                    <p className="text-sm text-muted-foreground italic py-2">
+                      No body text was entered. Edit the document to add memo content.
                     </p>
                   )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+                </section>
 
-            <TabsContent value="versions">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Hash className="h-4 w-4" /> Version History
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <VersionHistory versions={versions ?? []} loading={versionsLoading} />
-                </CardContent>
-              </Card>
-            </TabsContent>
+                {/* Attachments */}
+                <section className="space-y-3 px-4 py-6 sm:px-6" aria-labelledby="section-attachments">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h3
+                      id="section-attachments"
+                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
+                    >
+                      <Paperclip className="h-3.5 w-3.5" /> Supporting attachments
+                    </h3>
+                    {canUploadAttachment && (
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) uploadMutation.mutate(f);
+                          }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          loading={uploadMutation.isPending}
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Upload className="h-4 w-4" /> Upload
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {!attachments?.length ? (
+                    <p className="text-sm text-muted-foreground italic">No attachments.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {attachments.map((a) => (
+                        <li
+                          key={a.id}
+                          className="flex items-center justify-between gap-2 text-sm border border-border/60 rounded-lg px-3 py-2 bg-background"
+                        >
+                          <span className="truncate flex items-center gap-2">
+                            <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            {a.filename}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => downloadAttachment(a.id, a.filename)}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {/* Comments */}
+                <DocumentCommentsSection
+                  documentId={doc.id}
+                  actions={workflowActions}
+                  actionsLoading={workflowActionsLoading}
+                  canComment={canPostComment}
+                  isDirectMessage={doc.delivery_mode === 'direct_message'}
+                  isWorkflow={doc.delivery_mode === 'workflow'}
+                  workflowInstanceId={workflowInstanceIdForActions}
+                  canAdvanceWorkflow={canAdvanceWorkflow}
+                  workflowStepActionType={workflowStepActionType}
+                  ownUserId={user?.user_id ?? null}
+                  currentUserIds={recipients?.map((r) => r.user_id) ?? []}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Secondary inspectors — audit + BPMN — kept as tabs to avoid stretching the page. */}
+          <Tabs defaultValue="audit">
+            <TabsList>
+              <TabsTrigger value="audit">
+                <Shield className="h-3.5 w-3.5" /> Audit {auditLogs ? `(${auditLogs.length})` : ''}
+              </TabsTrigger>
+              <TabsTrigger value="workflow">
+                <GitBranch className="h-3.5 w-3.5" /> Workflow
+              </TabsTrigger>
+              <TabsTrigger value="versions">
+                <Hash className="h-3.5 w-3.5" /> Versions {versions ? `(${versions.length})` : ''}
+              </TabsTrigger>
+            </TabsList>
 
             <TabsContent value="audit">
               <Card>
@@ -656,7 +966,7 @@ export default function DocumentDetailPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" /> BPMN routing & approvals
+                    <GitBranch className="h-4 w-4" /> BPMN routing &amp; approvals
                   </CardTitle>
                   <p className="text-sm text-muted-foreground font-normal">
                     Read-only view of the workflow engine path (linear orchestration). Approvals and transitions
@@ -668,79 +978,138 @@ export default function DocumentDetailPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            <TabsContent value="versions">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Hash className="h-4 w-4" /> Version History
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {versionsLoading ? (
+                    <Skeleton className="h-20 w-full" />
+                  ) : !versions?.length ? (
+                    <p className="text-sm text-muted-foreground">No versions.</p>
+                  ) : (
+                    <ul className="space-y-2 text-sm">
+                      {[...versions]
+                        .sort((a, b) => b.version_number - a.version_number)
+                        .map((v) => (
+                          <li
+                            key={v.id}
+                            className="flex justify-between gap-2 border border-border/60 rounded-lg px-3 py-2"
+                          >
+                            <span className="font-medium">v{v.version_number}</span>
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                              {formatDateTime(v.created_at)}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
+        </div>
+
+        <aside className="min-w-0 xl:sticky xl:top-4 space-y-4">
+          <DocumentActivitySidebar
+            createdAt={doc.created_at}
+            actions={workflowActions}
+            actionsLoading={workflowActionsLoading}
+            versions={versions}
+            versionsLoading={versionsLoading}
+          />
+          <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
+            <strong>Export document</strong> opens a printable view with the full case file:
+            NHIA letterhead (for internal memos), document body, profile, recipients,
+            attachments and the complete comments &amp; activity timeline. Use your
+            browser's print dialog to save it as a PDF.
+          </p>
+        </aside>
+      </div>
+
+      <Dialog open={recipientOpen} onOpenChange={setRecipientOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add recipient</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label>User</Label>
+              <Select value={recipientUserId} onValueChange={setRecipientUserId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select user" />
+                </SelectTrigger>
+                <SelectContent>
+                  {users?.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-
-            <aside className="min-w-0 xl:sticky xl:top-4 space-y-4">
-              <DocumentActivitySidebar
-                createdAt={doc.created_at}
-                actions={workflowActions}
-                actionsLoading={workflowActionsLoading}
-                versions={versions}
-                versionsLoading={versionsLoading}
-              />
-              <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
-                Official preview opens in a new tab: NHIA letterhead plus memo layout (custom templates get the same NHIA
-                banner above the template HTML). After <strong>Final approval</strong>, the signatory signature is
-                shown in preview and below the body on the Content tab.
-              </p>
-            </aside>
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select
+                value={recipientType}
+                onValueChange={(v) => setRecipientType(v as RecipientType)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="to">To</SelectItem>
+                  <SelectItem value="cc">CC</SelectItem>
+                  <SelectItem value="bcc">BCC</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecipientOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              loading={addRecipientMutation.isPending}
+              disabled={!recipientUserId}
+              onClick={() => addRecipientMutation.mutate()}
+            >
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-          <Dialog open={recipientOpen} onOpenChange={setRecipientOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add recipient</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3 py-2">
-                <div className="space-y-1.5">
-                  <Label>User</Label>
-                  <Select value={recipientUserId} onValueChange={setRecipientUserId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select user" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {users?.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Type</Label>
-                  <Select
-                    value={recipientType}
-                    onValueChange={(v) => setRecipientType(v as RecipientType)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="to">To</SelectItem>
-                      <SelectItem value="cc">CC</SelectItem>
-                      <SelectItem value="bcc">BCC</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setRecipientOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  loading={addRecipientMutation.isPending}
-                  disabled={!recipientUserId}
-                  onClick={() => addRecipientMutation.mutate()}
-                >
-                  Add
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </>
-      ) : null}
+      {/**
+       * Floating discussions widget — anchored to the viewport so users can pop
+       * private side-chats open without navigating away from the document.
+       */}
+      <DocumentDiscussionsPanel documentId={doc.id} currentUserId={user?.user_id ?? null} />
+    </div>
+  );
+}
+
+interface ReadOnlyFieldProps {
+  label: string;
+  value: string;
+  mono?: boolean;
+  className?: string;
+}
+
+function ReadOnlyField({ label, value, mono, className }: ReadOnlyFieldProps) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={`text-sm ${mono ? 'font-mono' : ''} ${className ?? ''} text-foreground`}
+        title={value}
+      >
+        {value}
+      </p>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { DocumentStatus } from '@/types/document';
+import type { DocumentDeliveryMode, DocumentStatus } from '@/types/document';
 
 export type DocumentActionContext = {
   /** JWT permission names (e.g. `submit_document`, `edit_document`) */
@@ -9,6 +9,10 @@ export type DocumentActionContext = {
   ownerId?: string | null;
   /** True when the user has a pending/in_progress task on this document for the workflow instance's current step. */
   hasActiveWorkflowTask?: boolean;
+  /** Document `delivery_mode` — used for direct-message vs workflow behaviour. */
+  deliveryMode?: DocumentDeliveryMode | null;
+  /** True when the current user is listed in document recipients (direct message path). */
+  isDirectMessageRecipient?: boolean;
 };
 
 /** Normalize `workflow_templates.steps[].action_type` for comparisons. */
@@ -38,16 +42,55 @@ export function getDocumentActions(
   canEditForward: boolean;
   canApproveForward: boolean;
   canRequestInfo: boolean;
+  /** Pending direct-message: owner may approve (pending → approved) after recipient input. */
+  canApproveDirectMessage: boolean;
 } {
   const permissions = context.permissions ?? [];
   const isAdmin = roles.includes('admin');
-  const isReviewer = roles.includes('reviewer');
   const isSubmitter = roles.includes('submitter');
-  const isDirector = roles.includes('director');
 
   const uid = context.userId?.trim();
   const oid = context.ownerId?.trim();
   const isDraftOwner = Boolean(uid && oid && uid === oid);
+
+  const dm = context.deliveryMode === 'direct_message';
+  const isDmRecipient =
+    status === 'pending' &&
+    dm &&
+    context.isDirectMessageRecipient === true &&
+    Boolean(uid);
+  const isDmOwner = status === 'pending' && dm && isDraftOwner;
+
+  if (isDmRecipient) {
+    return {
+      canEdit: false,
+      canSubmit: false,
+      canFinalApprove: false,
+      canReject: true,
+      canArchive: false,
+      canEditForward: true,
+      canApproveForward: false,
+      canRequestInfo: true,
+      canApproveDirectMessage: isDraftOwner,
+    };
+  }
+
+  if (isDmOwner) {
+    // The original sender may mark the document reviewed. They can comment /
+    // forward only when the baton is explicitly sent back to them, handled by
+    // the active direct-message recipient branch above.
+    return {
+      canEdit: false,
+      canSubmit: false,
+      canFinalApprove: false,
+      canReject: false,
+      canArchive: false,
+      canEditForward: false,
+      canApproveForward: false,
+      canRequestInfo: false,
+      canApproveDirectMessage: true,
+    };
+  }
 
   const canEditDraftBody =
     isAdmin || isSubmitter || isDraftOwner || permissions.includes('edit_document');
@@ -65,9 +108,11 @@ export function getDocumentActions(
     canFinalApprove: pendingMyStep,
     canReject: pendingMyStep,
     canArchive: status === 'approved' && isAdmin,
-    canEditForward: false,
+    /** Active step assignees may post a free-form comment on the document (no status change). */
+    canEditForward: pendingMyStep,
     canApproveForward: pendingMyStep,
     canRequestInfo: pendingMyStep,
+    canApproveDirectMessage: false,
   };
 
   if (!pendingMyStep || workflowStepActionType == null || String(workflowStepActionType).trim() === '') {
@@ -83,19 +128,22 @@ export function getDocumentActions(
         ...base,
         canEdit: false,
         canApproveForward: false,
+        canApproveDirectMessage: false,
       };
     case 'review':
-      // Forward-only step (no approve-forward / final approve on this step).
+      // Forward-only step (no approve-forward / final approve here, but free-form comment is fine).
       return {
         ...base,
         canApproveForward: false,
         canFinalApprove: false,
+        canApproveDirectMessage: false,
       };
     case 'approve':
     case 'approve_forward':
       return {
         ...base,
         canFinalApprove: false,
+        canApproveDirectMessage: false,
       };
     default:
       return base;

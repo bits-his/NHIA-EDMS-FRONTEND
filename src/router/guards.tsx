@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import type { ReactNode } from 'react';
+import { canCreateDocument } from '@/utils/permissions';
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -24,6 +25,22 @@ export function PublicRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/dashboard" replace />;
   }
 
+  return <>{children}</>;
+}
+
+/** Anyone who may create documents (same bar as /documents/new) may open user directory routes. */
+export function CanCreateDocumentGuard({
+  children,
+  fallback,
+}: {
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const permissions = useAuthStore((s) => s.user?.permissions ?? []);
+  if (!canCreateDocument(roles, permissions)) {
+    return fallback ? <>{fallback}</> : null;
+  }
   return <>{children}</>;
 }
 

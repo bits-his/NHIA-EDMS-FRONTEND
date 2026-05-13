@@ -14,7 +14,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { canAccessTemplateManagement, canAccessAuditLogModule } from '@/utils/permissions';
+import { canAccessTemplateManagement, canAccessAuditLogModule, canCreateDocument } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { formatAuthRolesForDisplay } from '@/utils/workflowEditor';
 import { useNotificationStore } from '@/stores/notificationStore';
@@ -43,7 +43,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const isAdmin = user?.roles.includes('admin') ?? false;
+  const showUserDirectory = user?.roles
+    ? canCreateDocument(user.roles, user.permissions ?? [])
+    : false;
   const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
   const showAuditNav = canAccessAuditLogModule(user?.roles);
 
@@ -179,8 +181,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </>
         )}
 
-        {/* ── Admin section ── */}
-        {isAdmin && (
+        {/* ── Admin section (user directory for document creators + admins) ── */}
+        {showUserDirectory && (
           <>
             {!collapsed && (
               <div className="px-3 pt-3 pb-1">

@@ -180,7 +180,11 @@ export default function EditDocumentPage() {
           <p className="text-sm text-muted-foreground mt-1">Modify the document title and content</p>
         </div>
         {document && (
-          <DocumentStatusBadge status={document.status} pendingStageLabel={pendingStageLabel} />
+          <DocumentStatusBadge
+            status={document.status}
+            pendingStageLabel={pendingStageLabel}
+            statusLabel={document.status_label}
+          />
         )}
       </div>
 

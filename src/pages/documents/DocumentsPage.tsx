@@ -1,12 +1,24 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Search, SlidersHorizontal, X, ChevronRight } from 'lucide-react';
+import {
+  Plus,
+  FileText,
+  Search,
+  SlidersHorizontal,
+  X,
+  ChevronRight,
+  Pencil,
+  Inbox,
+  CheckCircle2,
+  Layers,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
@@ -25,6 +37,27 @@ import { cn } from '@/utils/cn';
 const STATUS_ORDER: Record<DocumentStatus, number> = {
   pending: 0, draft: 1, rejected: 2, approved: 3, archived: 4,
 };
+
+/**
+ * Tab buckets for the documents list. The backend `listDocumentsForUser` already
+ * narrows results to documents the user is involved in (owner, recipient, or has
+ * an active workflow task) — so pending docs in the user's list represent work
+ * that needs their attention. Leadership oversight roles see broader sets, which
+ * is acceptable since their "Action required" view is intentionally inclusive.
+ */
+type DocumentBucket = 'all' | 'drafts' | 'action' | 'completed';
+
+const FINISHED_STATUSES: ReadonlySet<DocumentStatus> = new Set([
+  'approved',
+  'archived',
+  'rejected',
+]);
+
+function bucketForStatus(status: DocumentStatus): Exclude<DocumentBucket, 'all'> {
+  if (status === 'draft') return 'drafts';
+  if (status === 'pending') return 'action';
+  return 'completed';
+}
 
 function categoryLabel(c: DocumentCategory | null | undefined): string {
   if (c === 'internal_memo') return 'Internal';
@@ -46,7 +79,7 @@ export default function DocumentsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<DocumentCategory | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all');
+  const [bucket, setBucket] = useState<DocumentBucket>('all');
 
   const useServerSearch = Boolean(
     search.trim() ||
@@ -73,23 +106,36 @@ export default function DocumentsPage() {
     staleTime: 30_000,
   });
 
-  const filtered = (allDocuments ?? []).filter((doc) => {
-    const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
-    return matchesStatus;
+  const docs = allDocuments ?? [];
+
+  const bucketCounts = docs.reduce(
+    (acc, d) => {
+      acc.all += 1;
+      acc[bucketForStatus(d.status)] += 1;
+      return acc;
+    },
+    { all: 0, drafts: 0, action: 0, completed: 0 }
+  );
+
+  const filtered = docs.filter((doc) => {
+    if (bucket === 'all') return true;
+    if (bucket === 'drafts') return doc.status === 'draft';
+    if (bucket === 'action') return doc.status === 'pending';
+    return FINISHED_STATUSES.has(doc.status);
   });
 
   const sorted = [...filtered].sort(
     (a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
   );
 
-  const pendingCount = (allDocuments ?? []).filter((d) => d.status === 'pending').length;
+  const pendingCount = bucketCounts.action;
   const hasFilters =
     search ||
     refFilter ||
     dateFrom ||
     dateTo ||
     categoryFilter !== 'all' ||
-    statusFilter !== 'all';
+    bucket !== 'all';
 
   return (
     <div className="space-y-5">
@@ -106,10 +152,10 @@ export default function DocumentsPage() {
       />
 
       {/* Pending callout */}
-      {pendingCount > 0 && (
+      {pendingCount > 0 && bucket !== 'action' && (
         <button
           className="w-full flex items-center justify-between p-4 rounded-xl border-2 border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-left"
-          onClick={() => setStatusFilter('pending')}
+          onClick={() => setBucket('action')}
         >
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/40">
@@ -129,6 +175,47 @@ export default function DocumentsPage() {
           </span>
         </button>
       )}
+
+      {/* Tabs */}
+      <Tabs value={bucket} onValueChange={(v) => setBucket(v as DocumentBucket)}>
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="all">
+            <Layers className="h-3.5 w-3.5" />
+            All
+            <span className="ml-1 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {bucketCounts.all}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="drafts">
+            <Pencil className="h-3.5 w-3.5" />
+            Drafts
+            <span className="ml-1 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {bucketCounts.drafts}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="action">
+            <Inbox className="h-3.5 w-3.5" />
+            Action required
+            <span
+              className={cn(
+                'ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+                bucketCounts.action > 0
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                  : 'bg-foreground/5 text-muted-foreground'
+              )}
+            >
+              {bucketCounts.action}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="completed">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Completed
+            <span className="ml-1 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {bucketCounts.completed}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Filters */}
       <div className="flex items-center gap-2.5 flex-wrap">
@@ -176,22 +263,20 @@ export default function DocumentsPage() {
               <SelectItem value="external_correspondence">External</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as DocumentStatus | 'all')}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="pending">Pending Review</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
         {hasFilters && (
-          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setRefFilter(''); setDateFrom(''); setDateTo(''); setCategoryFilter('all'); setStatusFilter('all'); }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearch('');
+              setRefFilter('');
+              setDateFrom('');
+              setDateTo('');
+              setCategoryFilter('all');
+              setBucket('all');
+            }}
+          >
             <X className="h-3.5 w-3.5" /> Clear
           </Button>
         )}
@@ -201,7 +286,16 @@ export default function DocumentsPage() {
       {!isLoading && !error && (
         <p className="text-xs text-muted-foreground">
           {sorted.length} document{sorted.length !== 1 ? 's' : ''}
-          {statusFilter !== 'all' && <span className="ml-1 capitalize">· {statusFilter}</span>}
+          {bucket !== 'all' && (
+            <span className="ml-1 capitalize">
+              ·{' '}
+              {bucket === 'drafts'
+                ? 'drafts'
+                : bucket === 'action'
+                  ? 'action required'
+                  : 'completed'}
+            </span>
+          )}
         </p>
       )}
 
@@ -235,10 +329,43 @@ export default function DocumentsPage() {
         </div>
       ) : sorted.length === 0 ? (
         <EmptyState
-          icon={FileText}
-          title={hasFilters ? 'No matching documents' : 'No documents yet'}
-          description={hasFilters ? 'Try adjusting your search or filters' : 'Create your first document to get started'}
-          action={canCreateDocument(user?.roles ?? [], user?.permissions ?? []) ? { label: 'Create Document', onClick: () => navigate('/documents/new') } : undefined}
+          icon={
+            bucket === 'drafts'
+              ? Pencil
+              : bucket === 'action'
+                ? Inbox
+                : bucket === 'completed'
+                  ? CheckCircle2
+                  : FileText
+          }
+          title={
+            hasFilters
+              ? bucket === 'drafts'
+                ? 'No drafts'
+                : bucket === 'action'
+                  ? 'Nothing needs your action'
+                  : bucket === 'completed'
+                    ? 'No completed documents yet'
+                    : 'No matching documents'
+              : 'No documents yet'
+          }
+          description={
+            bucket === 'drafts'
+              ? 'Drafts you create or have been returned to you will appear here.'
+              : bucket === 'action'
+                ? 'You are all caught up. Pending documents that need your input will land here.'
+                : bucket === 'completed'
+                  ? 'Approved, archived and rejected documents you participated in will appear here.'
+                  : hasFilters
+                    ? 'Try adjusting your search or filters'
+                    : 'Create your first document to get started'
+          }
+          action={
+            canCreateDocument(user?.roles ?? [], user?.permissions ?? []) &&
+            (bucket === 'all' || bucket === 'drafts')
+              ? { label: 'Create Document', onClick: () => navigate('/documents/new') }
+              : undefined
+          }
         />
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
@@ -294,7 +421,7 @@ export default function DocumentsPage() {
                         {categoryLabel(doc.category)}
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <DocumentStatusBadge status={doc.status} size="sm" />
+                        <DocumentStatusBadge status={doc.status} statusLabel={doc.status_label} size="sm" />
                       </td>
                       <td className="px-4 py-3 align-top">
                         {doc.ref_number ? (

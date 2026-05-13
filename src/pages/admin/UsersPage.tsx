@@ -37,6 +37,8 @@ import { cn } from '@/utils/cn';
 import { getErrorMessage } from '@/api/client';
 import type { Role } from '@/types/auth';
 import type { UserRecord } from '@/api/auth';
+import { useAuthStore } from '@/stores/authStore';
+import { canViewOperationalOverview } from '@/utils/permissions';
 
 const ROLE_COLORS: Record<string, string> = {
   admin:     'bg-violet-50 text-violet-700 ring-1 ring-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:ring-violet-800',
@@ -168,6 +170,13 @@ const SELECT_NONE = '__none__';
 export default function UsersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const authUser = useAuthStore((s) => s.user);
+  const permissions = authUser?.permissions ?? [];
+  const roleNames = authUser?.roles ?? [];
+  const canManageUsers = permissions.includes('manage_users');
+  const canManageRoles = permissions.includes('manage_roles');
+  const canViewAuditNav = roleNames.some((r) => ['admin', 'director', 'general_manager'].includes(String(r).toLowerCase()));
+  const showTaskCounts = canManageUsers || canViewOperationalOverview(roleNames, permissions);
 
   const [createUserOpen,    setCreateUserOpen]    = useState(false);
   const [createRoleOpen,    setCreateRoleOpen]     = useState(false);
@@ -214,7 +223,7 @@ export default function UsersPage() {
       });
       return map;
     },
-    enabled: !!users?.length,
+    enabled: !!users?.length && showTaskCounts,
     staleTime: 30_000,
   });
 
@@ -235,16 +244,26 @@ export default function UsersPage() {
     <div className="space-y-6">
       <PageHeader
         title="User Management"
-        description="Create and manage users, roles, and permissions"
+        description={
+          canManageUsers
+            ? 'Create and manage users, roles, and permissions'
+            : 'Browse users and roles (same directory as document recipient selection)'
+        }
         actions={
+          (canManageUsers || canManageRoles) ? (
           <div className="flex items-center gap-2">
+            {canManageRoles && (
             <Button variant="outline" size="sm" onClick={() => setCreateRoleOpen(true)}>
               <Shield className="h-4 w-4" /> New Role
             </Button>
+            )}
+            {canManageUsers && (
             <Button size="sm" onClick={() => setCreateUserOpen(true)}>
               <UserPlus className="h-4 w-4" /> New User
             </Button>
+            )}
           </div>
+          ) : undefined
         }
       />
 
@@ -306,6 +325,8 @@ export default function UsersPage() {
                           {taskMap![u.id]} active tasks
                         </span>
                       )}
+                      {canManageUsers && (
+                      <>
                       <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => setEditProfileUser(u)}>
                         <Edit className="h-3.5 w-3.5" />
                       </Button>
@@ -315,9 +336,14 @@ export default function UsersPage() {
                       <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => setResetPwUser(u)}>
                         <RefreshCw className="h-3.5 w-3.5" />
                       </Button>
+                      </>
+                      )}
+                      {canViewAuditNav && (
                       <Button variant="ghost" size="icon-sm" title="View audit logs" onClick={() => navigate('/audit')}>
                         <Activity className="h-3.5 w-3.5" />
                       </Button>
+                      )}
+                      {canManageUsers && (
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -327,6 +353,7 @@ export default function UsersPage() {
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -354,7 +381,9 @@ export default function UsersPage() {
                       </th>
                     ))}
                     <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned to</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
+                    <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {canManageRoles ? 'Actions' : ''}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -387,6 +416,7 @@ export default function UsersPage() {
                           </div>
                         </td>
                         <td className="px-5 py-3.5 text-right">
+                          {canManageRoles ? (
                           <Button
                             size="sm"
                             variant="outline"
@@ -395,6 +425,9 @@ export default function UsersPage() {
                             <Edit className="h-3.5 w-3.5" />
                             Edit permissions
                           </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </td>
                       </tr>
                     );

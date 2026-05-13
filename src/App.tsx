@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { RouterProvider } from 'react-router-dom';
 import { QueryProvider } from '@/providers/QueryProvider';
 import { ThemeProvider } from '@/providers/ThemeProvider';
-import { router } from '@/router';
+import { AppRouter } from '@/router';
 import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/api/auth';
 import { PageLoader } from '@/components/shared/PageLoader';
@@ -48,7 +47,7 @@ export default function App() {
     <ThemeProvider>
       <QueryProvider>
         <AuthGate>
-          <RouterProvider router={router} />
+          <AppRouter />
         </AuthGate>
       </QueryProvider>
     </ThemeProvider>

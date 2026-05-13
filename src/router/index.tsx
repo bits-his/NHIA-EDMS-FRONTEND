@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react';
-import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { ProtectedRoute, PublicRoute, RoleGuard } from './guards';
+import { lazy, Suspense, useMemo } from 'react';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { ProtectedRoute, PublicRoute, RoleGuard, CanCreateDocumentGuard } from './guards';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/shared/PageLoader';
 
@@ -26,7 +26,7 @@ function Wrap({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
 }
 
-export const router = createBrowserRouter([
+const routerConfig = [
   {
     path: '/login',
     element: (
@@ -159,9 +159,9 @@ export const router = createBrowserRouter([
         path: 'admin/users',
         element: (
           <Wrap>
-            <RoleGuard roles={['admin']} fallback={<Navigate to="/dashboard" replace />}>
+            <CanCreateDocumentGuard fallback={<Navigate to="/dashboard" replace />}>
               <UsersPage />
-            </RoleGuard>
+            </CanCreateDocumentGuard>
           </Wrap>
         ),
       },
@@ -198,4 +198,14 @@ export const router = createBrowserRouter([
     ],
   },
   { path: '*', element: <Navigate to="/login" replace /> },
-]);
+];
+
+/**
+ * Wrap the data router in a component so this module exports only components.
+ * That lets Vite React Fast Refresh hot-update guards / routes without invalidating
+ * `router`, which would leave the live `RouterProvider` with a stale (null) context.
+ */
+export function AppRouter() {
+  const router = useMemo(() => createBrowserRouter(routerConfig), []);
+  return <RouterProvider router={router} />;
+}
