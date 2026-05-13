@@ -11,6 +11,8 @@ import type {
   UpdateDocumentResponse,
   DocumentSearchFilters,
   CreateRecipientInput,
+  DocumentCreationProfile,
+  DocumentUrgency,
 } from '@/types/document';
 import type { DocumentTemplate, SaveDocumentTemplatePayload } from '@/types/documentTemplate';
 import type { OrgScopeReferenceResponse } from '@/types/orgScope';
@@ -35,7 +37,7 @@ export const documentsApi = {
     file: File,
     title: string,
     department: string,
-    options?: { ref_number?: string }
+    options?: { ref_number?: string; urgency?: DocumentUrgency } & Partial<DocumentCreationProfile>
   ): Promise<CreateDocumentResponse> => {
     const form = new FormData();
     form.append('file', file);
@@ -43,6 +45,27 @@ export const documentsApi = {
     form.append('department', department);
     if (options?.ref_number?.trim()) {
       form.append('ref_number', options.ref_number.trim());
+    }
+    if (options?.urgency) {
+      form.append('urgency', options.urgency);
+    }
+    if (options?.delivery_mode) {
+      form.append('delivery_mode', options.delivery_mode);
+    }
+    if (options?.input_mode) {
+      form.append('input_mode', options.input_mode);
+    }
+    if (options?.file_classification) {
+      form.append('file_classification', options.file_classification);
+    }
+    if (options?.document_effective_date?.trim()) {
+      form.append('document_effective_date', options.document_effective_date.trim());
+    }
+    if (options?.intake_file_name?.trim()) {
+      form.append('intake_file_name', options.intake_file_name.trim());
+    }
+    if (options?.selected_workflow_template_id?.trim()) {
+      form.append('selected_workflow_template_id', options.selected_workflow_template_id.trim());
     }
     const res = await documentClient.post<CreateDocumentResponse>('/documents/upload', form);
     return res.data;

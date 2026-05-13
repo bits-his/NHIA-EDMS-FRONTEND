@@ -411,14 +411,18 @@ export function DocumentActions({
           open
           onOpenChange={(open) => !open && setPendingConfirm(null)}
           title="Submit document"
-          description="This submits the document for review. If this memo’s template has an assigned workflow, that workflow starts now. You will not be able to edit content until it is rejected back to draft."
+          description="This submits the document for review. If a workflow was chosen when the document was created, or if this memo’s catalogue template assigns a workflow, that workflow starts now (once). You will not be able to edit content until it is rejected back to draft."
           confirmLabel="Submit"
           variant="default"
           onConfirm={async () => {
             setSubmitForReviewLoading(true);
             try {
               await documentsApi.submit(document.id);
-              const wf = await startWorkflowFromDocumentTemplate(document.id, document.template_id);
+              const wf = await startWorkflowFromDocumentTemplate(
+                document.id,
+                document.template_id,
+                document.selected_workflow_template_id
+              );
               if (wf.error) {
                 toast.error(
                   `Document submitted for review, but the workflow did not start: ${wf.error}`

@@ -9,6 +9,22 @@ export type DocumentCategory = 'internal_memo' | 'external_correspondence';
 
 export type DocumentUrgency = 'normal' | 'urgent' | 'very_urgent';
 
+export type DocumentDeliveryMode = 'workflow' | 'direct_message';
+
+export type DocumentInputMode = 'template' | 'manual_entry';
+
+export type DocumentFileClassification = 'normal' | 'important' | 'secret' | 'top_secret';
+
+/** Optional fields persisted with POST /documents and POST /documents/upload */
+export type DocumentCreationProfile = {
+  delivery_mode?: DocumentDeliveryMode;
+  input_mode?: DocumentInputMode;
+  file_classification?: DocumentFileClassification;
+  document_effective_date?: string;
+  intake_file_name?: string;
+  selected_workflow_template_id?: string;
+};
+
 export type RecipientType = 'to' | 'cc' | 'bcc';
 
 export interface Document {
@@ -27,6 +43,13 @@ export interface Document {
   file_path?: string | null;
   original_filename?: string | null;
   signatory_id?: string | null;
+  delivery_mode?: DocumentDeliveryMode | null;
+  input_mode?: DocumentInputMode | null;
+  file_classification?: DocumentFileClassification | null;
+  document_effective_date?: string | null;
+  intake_file_name?: string | null;
+  selected_workflow_template_id?: string | null;
+  receive_recorded_at?: string | null;
 }
 
 export interface DocumentVersion {
@@ -77,7 +100,7 @@ export interface DocumentWorkflowAction {
   actor_state?: string | null;
 }
 
-export interface CreateDocumentRequest {
+export interface CreateDocumentRequest extends Partial<DocumentCreationProfile> {
   title: string;
   content?: string;
   category: DocumentCategory;

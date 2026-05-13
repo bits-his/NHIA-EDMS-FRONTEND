@@ -1,156 +1,369 @@
-import { useEffect, useRef, useState } from 'react';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, Eye, Upload, Plus, Trash2, Scan } from 'lucide-react';
+import { format } from 'date-fns';
+import { ArrowLeft, Upload, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import MemoEditor from '@/components/documents/MemoEditor';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { documentsApi } from '@/api/documents';
-import { searchApi } from '@/api/search';
+import { workflowApi } from '@/api/workflow';
 import { authApi } from '@/api/auth';
-import { registerUsers } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
-import type { RecipientType } from '@/types/document';
 import { cn } from '@/utils/cn';
+import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
+import { useAuthStore } from '@/stores/authStore';
+import type { DocumentUrgency } from '@/types/document';
+import type { UserRecord } from '@/api/auth';
+import type { Role } from '@/types/auth';
 
-const internalSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(500, 'Max 500 characters'),
-  content: z.string().optional(),
-  document_template_id: z.string().min(1, 'Document template is required'),
-  department: z.string().min(1, 'Department is required'),
-  urgency: z.enum(['normal', 'urgent', 'very_urgent']),
-  /** Leave blank for NHIA/DEPT/YEAR/SEQ auto-generation */
-  ref_number: z.string().max(120).optional(),
-  recipients: z.array(
-    z.object({
-      user_id: z.union([z.string().uuid(), z.literal('')]),
-      recipient_type: z.enum(['to', 'cc', 'bcc']),
-    })
-  ),
-});
+/** Human label for a grade / RBAC role (same idea as Users admin). */
+function roleDisplayLabel(role: Pick<Role, 'name' | 'description'>): string {
+  const d = role.description?.trim();
+  if (d) return d;
+  return role.name.replace(/_/g, ' ');
+}
 
-type InternalForm = z.infer<typeof internalSchema>;
+/** Grade ladder roles — `level` from auth API; high → low. */
+function gradeRolesSorted(all: Role[] | undefined): Role[] {
+  if (!all?.length) return [];
+  return [...all]
+    .filter((r) => r.level != null && typeof r.level === 'number')
+    .sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
+}
 
-const externalSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(500),
-  department: z.string().min(1, 'Department is required'),
-  ref_number: z.string().max(120).optional(),
-  recipients: z.array(
-    z.object({
-      user_id: z.union([z.string().uuid(), z.literal('')]),
-      recipient_type: z.enum(['to', 'cc', 'bcc']),
-    })
-  ),
-});
+function normRank(s: string | null | undefined): string {
+  return (s || '').trim().toLowerCase();
+}
 
-type ExternalForm = z.infer<typeof externalSchema>;
+function userMatchesGradeRole(u: UserRecord, role: Role): boolean {
+  const ur = normRank(u.rank);
+  if (!ur) return false;
+  const desc = normRank(role.description);
+  const nameHuman = normRank(role.name.replace(/_/g, ' '));
+  const nameRaw = normRank(role.name);
+  return ur === desc || ur === nameHuman || ur === nameRaw;
+}
+
+function userMatchesRankFilter(u: UserRecord, rankFilter: string): boolean {
+  if (!rankFilter.trim()) return true;
+  const ur = normRank(u.rank);
+  return ur === normRank(rankFilter);
+}
+
+type RankFilterOption = { value: string; label: string };
+
+/** Rank options that actually appear on at least one recipient user; grade order first, then other rank strings. */
+function buildRankFilterOptions(users: UserRecord[], roles: Role[] | undefined): RankFilterOption[] {
+  const graded = gradeRolesSorted(roles);
+  const seenNorm = new Set<string>();
+  const ordered: RankFilterOption[] = [];
+
+  for (const r of graded) {
+    const value = r.description?.trim() || roleDisplayLabel(r);
+    const key = normRank(value);
+    if (seenNorm.has(key)) continue;
+    if (!users.some((u) => userMatchesGradeRole(u, r))) continue;
+    seenNorm.add(key);
+    ordered.push({ value, label: roleDisplayLabel(r) });
+  }
+
+  const extras: RankFilterOption[] = [];
+  for (const u of users) {
+    const rr = u.rank?.trim();
+    if (!rr) continue;
+    const key = normRank(rr);
+    if (seenNorm.has(key)) continue;
+    seenNorm.add(key);
+    extras.push({ value: rr, label: rr });
+  }
+  extras.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+
+  return [...ordered, ...extras];
+}
+
+function recipientUserLabel(u: UserRecord): string {
+  const name = u.full_name?.trim() || u.username;
+  const rank = u.rank?.trim() || '—';
+  const dept = u.department?.trim() || '—';
+  return `${name} — ${rank}, ${dept}`;
+}
+
+const documentTypeSchema = z.enum(['internal', 'external']);
+const fileCategorySchema = z.enum(['secret', 'top_secret', 'important', 'normal']);
+const prioritySchema = z.enum(['normal', 'important', 'urgent', 'critical']);
+const actionSchema = z.enum(['send', 'draft']);
+const deliveryModeSchema = z.enum(['workflow', 'direct_message']);
+const documentSourceSchema = z.enum(['template', 'manual_entry']);
+
+const formSchema = z
+  .object({
+    delivery_mode: deliveryModeSchema,
+    document_source: documentSourceSchema,
+    document_type: documentTypeSchema,
+    document_date: z.string().min(1, 'Document date is required'),
+    document_template_id: z.string().optional(),
+    subject: z.string().min(1, 'Subject is required').max(500),
+    body_html: z.string().optional(),
+    body_text_external: z.string().optional(),
+    file_category: fileCategorySchema,
+    document_priority: prioritySchema,
+    file_name: z.string().min(1, 'File name is required').max(500),
+    ref_code: z.string().max(120).optional(),
+    action: actionSchema,
+    /** Filter users by profile rank (NHIA grade / title); required before recipient when sending direct message. */
+    direct_recipient_rank: z.string().optional(),
+    direct_recipient_user_id: z.string().optional(),
+    /** Workflow engine template (GET /workflows/templates); used when delivery is workflow + submit. */
+    workflow_template_id: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.delivery_mode === 'workflow' && !data.workflow_template_id?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select a workflow',
+        path: ['workflow_template_id'],
+      });
+    }
+    if (data.document_type === 'internal' && data.document_source === 'template') {
+      if (!data.document_template_id?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Document template is required',
+          path: ['document_template_id'],
+        });
+      }
+    }
+    if (data.delivery_mode === 'direct_message' && data.action === 'send') {
+      if (!data.direct_recipient_rank?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Select a rank / role first',
+          path: ['direct_recipient_rank'],
+        });
+      }
+      if (!data.direct_recipient_user_id?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Select a recipient',
+          path: ['direct_recipient_user_id'],
+        });
+      }
+    }
+  });
+
+type CreateFormValues = z.infer<typeof formSchema>;
+
+function priorityToUrgency(p: CreateFormValues['document_priority']): DocumentUrgency {
+  switch (p) {
+    case 'normal':
+      return 'normal';
+    case 'important':
+      return 'urgent';
+    case 'urgent':
+      return 'urgent';
+    case 'critical':
+      return 'very_urgent';
+    default:
+      return 'normal';
+  }
+}
+
+function resolveWorkflowDepartment(
+  profile: { department?: string | null } | undefined,
+  orgDepartments: { id: number; name: string }[] | undefined
+): string {
+  const fromProfile = profile?.department?.trim();
+  if (fromProfile && orgDepartments?.length) {
+    const m = orgDepartments.find((d) => d.name.toLowerCase() === fromProfile.toLowerCase());
+    if (m) return m.name;
+  }
+  return orgDepartments?.[0]?.name?.trim() ?? '';
+}
+
+function resolveDepartmentFromRecipient(
+  userId: string | undefined,
+  users: UserRecord[] | undefined,
+  orgDepartments: { id: number; name: string }[] | undefined
+): string {
+  if (!userId?.trim() || !users?.length) return orgDepartments?.[0]?.name?.trim() ?? '';
+  const u = users.find((x) => x.id === userId);
+  const dept = u?.department?.trim();
+  if (dept && orgDepartments?.length) {
+    const m = orgDepartments.find((d) => d.name.toLowerCase() === dept.toLowerCase());
+    if (m) return m.name;
+    return dept;
+  }
+  return orgDepartments?.[0]?.name?.trim() ?? '';
+}
 
 export default function CreateDocumentPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preDocumentTemplateId = searchParams.get('document_template_id') ?? undefined;
+  const authUser = useAuthStore((s) => s.user);
 
-  const [creationMode, setCreationMode] = useState<'internal' | 'external'>('internal');
-  const [preview, setPreview] = useState(false);
-  const [externalFile, setExternalFile] = useState<File | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const receiveDateLabel = useMemo(() => format(new Date(), 'MMMM d, yyyy'), []);
+
+  const { data: orgScope } = useQuery({
+    queryKey: QUERY_KEYS.orgScopeReference,
+    queryFn: () => documentsApi.getOrgScopeReference(),
+  });
 
   const { data: documentTemplates } = useQuery({
     queryKey: [QUERY_KEYS.documentTemplates],
     queryFn: () => documentsApi.listTemplates(),
   });
 
+  const { data: profile } = useQuery({
+    queryKey: ['auth-profile', authUser?.user_id],
+    queryFn: () => authApi.getProfile(authUser!.user_id),
+    enabled: !!authUser?.user_id,
+  });
+
   const { data: users } = useQuery({
-    queryKey: ['auth-users'],
-    queryFn: async () => {
-      const list = await authApi.listUsers();
-      registerUsers(list.map((u) => ({ id: u.id, username: u.username })));
-      return list;
-    },
+    queryKey: ['auth-users-create-doc'],
+    queryFn: () => authApi.listUsers(),
   });
 
-  const internalForm = useForm<InternalForm>({
-    resolver: zodResolver(internalSchema),
+  const { data: roles } = useQuery({
+    queryKey: ['auth-roles-create-doc'],
+    queryFn: () => authApi.listRoles(),
+  });
+
+  const form = useForm<CreateFormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
-      urgency: 'normal',
-      document_template_id: preDocumentTemplateId,
-      recipients: [] as InternalForm['recipients'],
+      delivery_mode: 'workflow',
+      document_source: 'template',
+      document_type: 'internal',
+      document_date: format(new Date(), 'yyyy-MM-dd'),
+      document_template_id: preDocumentTemplateId ?? '',
+      subject: '',
+      body_html: '',
+      body_text_external: '',
+      file_category: 'normal',
+      document_priority: 'normal',
+      file_name: '',
+      ref_code: '',
+      action: 'send',
+      direct_recipient_rank: '',
+      direct_recipient_user_id: '',
+      workflow_template_id: '',
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
-    control: internalForm.control,
-    name: 'recipients',
+  const { data: workflowTemplates } = useQuery({
+    queryKey: [QUERY_KEYS.workflowTemplates],
+    queryFn: () => workflowApi.getTemplates(),
   });
 
-  const externalForm = useForm<ExternalForm>({
-    resolver: zodResolver(externalSchema),
-    defaultValues: {
-      recipients: [],
-    },
-  });
-
-  const extRecipients = useFieldArray({
-    control: externalForm.control,
-    name: 'recipients',
-  });
-
-  const watchTitle = internalForm.watch('title');
-  const watchContent = internalForm.watch('content');
-  const documentTemplateId = internalForm.watch('document_template_id');
-
-  const [ocrOpen, setOcrOpen] = useState(false);
-
-  const ocrMutation = useMutation({
-    mutationFn: (file: File) => searchApi.ocr(file),
-    onSuccess: (data) => {
-      const parts = data.text.split(/\n\n/).filter(Boolean);
-      const html =
-        parts.length > 0
-          ? parts.map((p) => `<p>${p.replace(/\n/g, '<br/>')}</p>`).join('')
-          : `<p>${data.text.replace(/\n/g, '<br/>')}</p>`;
-      const cur = internalForm.getValues('content') ?? '';
-      internalForm.setValue('content', cur ? `${cur}${html}` : html);
-      toast.success('OCR text inserted into the editor');
-      setOcrOpen(false);
-    },
-    onError: (e) => toast.error(getErrorMessage(e)),
-  });
-
-  /** Apply catalogue template fields only when the selected template id changes (not on list refetch). */
-  const lastAppliedDocumentTemplateId = useRef<string | null>(null);
+  const deliveryMode = form.watch('delivery_mode');
+  const documentSource = form.watch('document_source');
+  const documentType = form.watch('document_type');
+  const documentTemplateId = form.watch('document_template_id');
+  const workflowTemplateId = form.watch('workflow_template_id');
+  const bodyHtml = form.watch('body_html');
 
   useEffect(() => {
+    if (deliveryMode !== 'workflow' || !workflowTemplates?.length) return;
+    const cur = form.getValues('workflow_template_id')?.trim();
+    if (cur && workflowTemplates.some((t) => t.id === cur)) return;
+    form.setValue('workflow_template_id', workflowTemplates[0].id, { shouldValidate: true });
+  }, [deliveryMode, workflowTemplates, form]);
+
+  useEffect(() => {
+    if (deliveryMode === 'direct_message') return;
+    form.setValue('direct_recipient_rank', '', { shouldValidate: true });
+    form.setValue('direct_recipient_user_id', '', { shouldValidate: true });
+  }, [deliveryMode, form]);
+
+  const recipientUsers = useMemo(
+    () => (users ?? []).filter((u) => u.id !== authUser?.user_id),
+    [users, authUser?.user_id]
+  );
+
+  const rankFilterOptions = useMemo(
+    () => buildRankFilterOptions(recipientUsers, roles),
+    [recipientUsers, roles]
+  );
+
+  const selectedRecipientRank = form.watch('direct_recipient_rank');
+  const selectedAction = form.watch('action');
+
+  const filteredRecipientUsers = useMemo(() => {
+    if (selectedAction === 'draft' && !selectedRecipientRank?.trim()) {
+      return recipientUsers;
+    }
+    if (!selectedRecipientRank?.trim()) {
+      return selectedAction === 'send' ? [] : recipientUsers;
+    }
+    return recipientUsers.filter((u) => userMatchesRankFilter(u, selectedRecipientRank));
+  }, [recipientUsers, selectedRecipientRank, selectedAction]);
+
+  const lastAppliedDocumentTemplateId = useRef<string | null>(null);
+  const prevDocumentSource = useRef(documentSource);
+
+  useEffect(() => {
+    if (documentType === 'external') {
+      form.setValue('document_source', 'manual_entry');
+    }
+  }, [documentType, form]);
+
+  useEffect(() => {
+    if (documentSource !== 'manual_entry' || documentType !== 'internal') return;
+    lastAppliedDocumentTemplateId.current = null;
+    form.setValue('document_template_id', '');
+    form.setValue('body_html', '');
+  }, [documentSource, documentType, form]);
+
+  useEffect(() => {
+    if (
+      documentType === 'internal' &&
+      prevDocumentSource.current === 'manual_entry' &&
+      documentSource === 'template'
+    ) {
+      lastAppliedDocumentTemplateId.current = null;
+    }
+    prevDocumentSource.current = documentSource;
+  }, [documentSource, documentType]);
+
+  /** Apply catalogue template body when the selected template id changes (not on list refetch). */
+  useEffect(() => {
+    if (documentType !== 'internal' || documentSource !== 'template') return;
     const id = documentTemplateId?.trim();
     if (!id || !documentTemplates?.length) return;
     const tpl = documentTemplates.find((t) => t.id === id);
     if (!tpl) return;
-
     if (lastAppliedDocumentTemplateId.current === id) return;
     lastAppliedDocumentTemplateId.current = id;
-
-    internalForm.setValue('title', tpl.name);
-    internalForm.setValue('content', tpl.body_template ?? '');
-    internalForm.setValue('department', tpl.department ?? '');
-  }, [documentTemplateId, documentTemplates]); // eslint-disable-line react-hooks/exhaustive-deps -- internalForm.setValue is stable
+    form.setValue('body_html', tpl.body_template ?? '');
+  }, [documentType, documentSource, documentTemplateId, documentTemplates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onDrop = (accepted: File[]) => {
     if (accepted[0]) {
-      setExternalFile(accepted[0]);
+      setUploadFile(accepted[0]);
+      const base = accepted[0].name.replace(/\.[^/.]+$/, '');
+      if (!form.getValues('file_name')?.trim()) {
+        form.setValue('file_name', base, { shouldValidate: true });
+      }
       toast.success(`Selected ${accepted[0].name}`);
     }
   };
+
+  const maxUploadBytes = documentType === 'internal' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -159,384 +372,587 @@ export default function CreateDocumentPage() {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     },
     maxFiles: 1,
-    maxSize: 10 * 1024 * 1024,
+    maxSize: maxUploadBytes,
   });
 
-  const internalMutation = useMutation({
-    mutationFn: async (data: InternalForm) => {
-      const recipientRows = (data.recipients ?? []).filter(
-        (r): r is { user_id: string; recipient_type: RecipientType } =>
-          typeof r.user_id === 'string' && r.user_id.length > 0
-      );
-      const recipients = recipientRows.length
-        ? recipientRows.map((r) => ({
-            user_id: r.user_id,
-            recipient_type: r.recipient_type,
-          }))
-        : undefined;
+  const submitMutation = useMutation({
+    mutationFn: async (data: CreateFormValues) => {
+      const urgency = priorityToUrgency(data.document_priority);
+      const ref = data.ref_code?.trim() || undefined;
+      const useWorkflow = data.delivery_mode === 'workflow';
+      const orgDepts = orgScope?.departments;
 
-      const result = await documentsApi.create({
-        title: data.title,
-        content: data.content,
-        category: 'internal_memo',
-        department: data.department.trim(),
-        template_id: data.document_template_id.trim(),
-        urgency: data.urgency,
-        ref_number: data.ref_number?.trim() || undefined,
-        recipients,
-      });
+      const department =
+        data.delivery_mode === 'direct_message'
+          ? resolveDepartmentFromRecipient(data.direct_recipient_user_id, users, orgDepts)
+          : resolveWorkflowDepartment(profile, orgDepts);
 
-      return result.document.id;
-    },
-    onSuccess: (docId) => {
-      toast.success('Document created successfully');
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
-      navigate(`/documents/${docId}`);
-    },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
+      if (!department) throw new Error('Could not resolve a department. Check org data or recipient profile.');
 
-  const externalMutation = useMutation({
-    mutationFn: async (data: ExternalForm) => {
-      if (!externalFile) throw new Error('Please attach a PDF or DOCX file');
-      const result = await documentsApi.uploadExternal(
-        externalFile,
-        data.title.trim(),
-        data.department.trim(),
-        { ref_number: data.ref_number?.trim() }
-      );
-      const docId = result.document.id;
+      const recipients =
+        data.delivery_mode === 'direct_message' && data.direct_recipient_user_id?.trim()
+          ? [{ user_id: data.direct_recipient_user_id.trim(), recipient_type: 'to' as const }]
+          : undefined;
 
-      const recRows = (data.recipients ?? []).filter(
-        (r): r is { user_id: string; recipient_type: RecipientType } =>
-          typeof r.user_id === 'string' && r.user_id.length > 0
-      );
-      for (const r of recRows) {
-        await documentsApi.addRecipient(docId, {
-          user_id: r.user_id,
-          recipient_type: r.recipient_type,
+      const creationProfile = {
+        delivery_mode: data.delivery_mode,
+        input_mode: data.document_source,
+        file_classification: data.file_category,
+        document_effective_date: data.document_date,
+        intake_file_name: data.file_name.trim(),
+        selected_workflow_template_id:
+          data.delivery_mode === 'workflow' ? data.workflow_template_id?.trim() || undefined : undefined,
+      };
+
+      const shouldSubmitToWorkflow = useWorkflow && data.action === 'send';
+
+      const finalizeWorkflow = async (docId: string) => {
+        if (!shouldSubmitToWorkflow) return;
+        await documentsApi.submit(docId);
+        const wfTpl = data.workflow_template_id?.trim();
+        if (!wfTpl) throw new Error('Select a workflow.');
+        const existing = await workflowApi.getInstanceByDocumentId(docId);
+        if (!existing) {
+          await workflowApi.start({ template_id: wfTpl, document_id: docId });
+        }
+      };
+
+      if (data.document_type === 'internal') {
+        if (data.document_source === 'manual_entry') {
+          const innerBody = (data.body_html ?? '').trim() || '<p></p>';
+          const created = await documentsApi.create({
+            title: data.subject.trim(),
+            content: innerBody,
+            category: 'internal_memo',
+            department,
+            urgency,
+            ref_number: ref,
+            recipients,
+            ...creationProfile,
+          });
+          const docId = created.document.id;
+          if (uploadFile) {
+            await documentsApi.uploadAttachment(docId, uploadFile);
+          }
+          await finalizeWorkflow(docId);
+          return docId;
+        }
+
+        const tplId = data.document_template_id?.trim();
+        if (!tplId) throw new Error('Select a document template.');
+        const innerBody = (data.body_html ?? '').trim() || '<p></p>';
+
+        const created = await documentsApi.create({
+          title: data.subject.trim(),
+          content: innerBody,
+          category: 'internal_memo',
+          department,
+          template_id: tplId,
+          urgency,
+          ref_number: ref,
+          recipients,
+          ...creationProfile,
         });
+
+        const docId = created.document.id;
+        if (uploadFile) {
+          await documentsApi.uploadAttachment(docId, uploadFile);
+        }
+        await finalizeWorkflow(docId);
+        return docId;
       }
 
+      if (!uploadFile) throw new Error('Please upload a document file');
+      const notes = data.body_text_external?.trim();
+      const title = data.subject.trim() || data.file_name.trim();
+      const created = await documentsApi.uploadExternal(uploadFile, title, department, {
+        ref_number: ref,
+        urgency,
+        ...creationProfile,
+      });
+      const docId = created.document.id;
+
+      if (recipients?.length) {
+        for (const r of recipients) {
+          await documentsApi.addRecipient(docId, r);
+        }
+      }
+
+      if (notes) {
+        await documentsApi.update(docId, {
+          content: `<p>${notes.replace(/\n/g, '<br/>')}</p>`,
+        });
+      }
+      await finalizeWorkflow(docId);
       return docId;
     },
     onSuccess: (docId) => {
-      toast.success('External correspondence saved');
+      const data = form.getValues();
+      if (data.delivery_mode === 'workflow' && data.action === 'send') {
+        toast.success('Document sent into workflow');
+      } else if (data.delivery_mode === 'workflow' && data.action === 'draft') {
+        toast.success('Draft saved (workflow not started)');
+      } else if (data.delivery_mode === 'direct_message' && data.action === 'send') {
+        toast.success('Document created for your recipient (workflow not used)');
+      } else {
+        toast.success('Draft saved');
+      }
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowInstanceByDocument(docId) });
       navigate(`/documents/${docId}`);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
+  const senderLine =
+    profile?.full_name?.trim() || profile?.username || authUser?.username || 'Signed-in user';
+  const senderEmail = profile?.email?.trim() || '—';
+  const letterheadLabel = documentType === 'internal' ? 'Internal document' : 'External document';
+  const showActionSection = deliveryMode === 'direct_message';
+
+  const submitDisabled =
+    (documentType === 'internal' &&
+      documentSource === 'template' &&
+      (!documentTemplates?.length || !documentTemplateId?.trim())) ||
+    (deliveryMode === 'workflow' &&
+      (!workflowTemplates?.length || !workflowTemplateId?.trim())) ||
+    false;
+
   return (
-    <div className="space-y-5 max-w-6xl">
+    <div className="w-full min-w-0 space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
         <ArrowLeft className="h-4 w-4" /> Documents
       </Button>
 
       <PageHeader
-        title="Create Document"
-        description="Add metadata and write the body in the editor, or upload external correspondence. OCR can insert text from a scan."
+        title="Create document"
+        description="Choose delivery mode and document input. With workflow, pick which workflow template runs after submit."
       />
 
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant={creationMode === 'internal' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setCreationMode('internal')}
-        >
-          <FileText className="h-4 w-4" /> Internal memo
-        </Button>
-        <Button
-          type="button"
-          variant={creationMode === 'external' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setCreationMode('external')}
-        >
-          <Upload className="h-4 w-4" /> External correspondence
-        </Button>
-      </div>
-
-      <Dialog open={preview} onOpenChange={setPreview}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Document preview (draft)</DialogTitle>
-          </DialogHeader>
-          <div className="border rounded-lg bg-white">
-            <div className="bg-white border-b px-8 py-6 text-center">
-              <div className="flex items-center justify-center gap-4 mb-3">
-                <img src="/logo.png" alt="NHIA Logo" className="h-16 w-16 object-contain" />
-                <div className="text-left">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
-                    Federal Republic of Nigeria
-                  </p>
-                  <h2 className="text-lg font-bold text-green-800 leading-tight">
-                    National Health Insurance Authority
-                  </h2>
-                  <p className="text-xs text-gray-600">
-                    Plot 297, Herbert Macaulay Way, Central Business District, Abuja
-                  </p>
-                </div>
-              </div>
-              <div className="border-t-4 border-green-700 mt-2 pt-2">
-                <p className="text-sm font-bold uppercase tracking-widest text-gray-700">Internal Memorandum</p>
-                {watchTitle && <p className="text-xs text-gray-500 mt-0.5">{watchTitle}</p>}
-              </div>
-            </div>
-            <div
-              className="prose prose-sm max-w-none px-8 py-6 text-gray-900"
-              dangerouslySetInnerHTML={{
-                __html: watchContent || '<p class="text-gray-400 italic">No content yet.</p>',
-              }}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={ocrOpen} onOpenChange={setOcrOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Extract text with OCR</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Same pipeline as Search → OCR. Text is appended to the memo body as HTML.
-          </p>
-          <input
-            type="file"
-            accept="image/*,application/pdf"
-            className="text-sm w-full"
-            disabled={ocrMutation.isPending}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) ocrMutation.mutate(f);
-              e.target.value = '';
-            }}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (deliveryMode === 'workflow') return;
+          form.handleSubmit((d) => submitMutation.mutate(d))();
+        }}
+        className="space-y-6"
+      >
+        <Card className="overflow-hidden border-border/80 shadow-sm">
+          <NhiaMemoLetterhead
+            documentTypeLabel={letterheadLabel}
+            zoneCode={profile?.zone ?? undefined}
+            stateOfficeName={profile?.state ?? undefined}
+            zones={orgScope?.zones}
           />
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOcrOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {creationMode === 'internal' ? (
-        <form
-          onSubmit={internalForm.handleSubmit((d) => internalMutation.mutate(d))}
-          className="space-y-4"
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4" /> Classification
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label>
-                    Document template <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={documentTemplateId?.trim() ? documentTemplateId : undefined}
-                    onValueChange={(v) => {
-                      lastAppliedDocumentTemplateId.current = null;
-                      internalForm.setValue('document_template_id', v, { shouldValidate: true });
-                    }}
-                  >
-                    <SelectTrigger
-                      className={
-                        internalForm.formState.errors.document_template_id ? 'border-destructive' : undefined
-                      }
+          <CardContent className="px-0 pb-6 pt-0">
+            <div className="divide-y divide-border">
+              {/* Mode & routing */}
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-mode">
+                <h3 id="section-mode" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Mode &amp; routing
+                </h3>
+                <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+                  <div className="space-y-2 min-w-0">
+                    <Label id="delivery-mode-label">Delivery</Label>
+                    <div
+                      role="radiogroup"
+                      aria-labelledby="delivery-mode-label"
+                      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-4"
                     >
-                      <SelectValue placeholder="Select a catalogue template" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {documentTemplates?.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name} ({t.status})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {internalForm.formState.errors.document_template_id && (
-                    <p className="text-xs text-destructive">
-                      {internalForm.formState.errors.document_template_id.message}
+                      <label
+                        className={cn(
+                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                          deliveryMode === 'workflow'
+                            ? 'border-primary bg-primary/5 text-foreground'
+                            : 'border-border bg-background hover:bg-muted/40'
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="delivery_mode"
+                          value="workflow"
+                          className="h-4 w-4 shrink-0 accent-primary"
+                          checked={deliveryMode === 'workflow'}
+                          onChange={() =>
+                            form.setValue('delivery_mode', 'workflow', { shouldValidate: true })
+                          }
+                        />
+                        <span className="font-medium">Use workflow</span>
+                      </label>
+                      <label
+                        className={cn(
+                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                          deliveryMode === 'direct_message'
+                            ? 'border-primary bg-primary/5 text-foreground'
+                            : 'border-border bg-background hover:bg-muted/40'
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="delivery_mode"
+                          value="direct_message"
+                          className="h-4 w-4 shrink-0 accent-primary"
+                          checked={deliveryMode === 'direct_message'}
+                          onChange={() =>
+                            form.setValue('delivery_mode', 'direct_message', { shouldValidate: true })
+                          }
+                        />
+                        <span className="font-medium">Direct message</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Workflow uses the standard approval path. Direct message targets a user and does not start
+                      workflow.
                     </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Title, body, and department update when you change template.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="department">
-                    Department <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="department"
-                    placeholder="e.g. Finance, HR"
-                    error={!!internalForm.formState.errors.department}
-                    {...internalForm.register('department')}
-                  />
-                  {internalForm.formState.errors.department && (
-                    <p className="text-xs text-destructive">{internalForm.formState.errors.department.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Urgency</Label>
-                  <Select
-                    value={internalForm.watch('urgency')}
-                    onValueChange={(v) =>
-                      internalForm.setValue('urgency', v as InternalForm['urgency'])
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="normal">Normal</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                      <SelectItem value="very_urgent">Very urgent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ref_number">Reference number (optional)</Label>
-                <Input
-                  id="ref_number"
-                  placeholder="Leave blank for auto-generated NHIA/DEPT/YEAR/sequence"
-                  {...internalForm.register('ref_number')}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Unique reference; leave empty for automatic numbering.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+                  </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4" /> Body
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="title">
-                  Title <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="title"
-                  placeholder="Enter document title"
-                  error={!!internalForm.formState.errors.title}
-                  autoFocus
-                  {...internalForm.register('title')}
-                />
-                {internalForm.formState.errors.title && (
-                  <p className="text-xs text-destructive">{internalForm.formState.errors.title.message}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <Label className="mb-0">Body (CKEditor)</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setOcrOpen(true)}>
-                    <Scan className="h-4 w-4" /> OCR into editor
-                  </Button>
+                  <div className="space-y-2 min-w-0">
+                    <Label id="document-source-label">Document input</Label>
+                    {documentType === 'internal' ? (
+                      <div
+                        role="radiogroup"
+                        aria-labelledby="document-source-label"
+                        className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-4"
+                      >
+                        <label
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                            documentSource === 'template'
+                              ? 'border-primary bg-primary/5 text-foreground'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="document_source"
+                            value="template"
+                            className="h-4 w-4 shrink-0 accent-primary"
+                            checked={documentSource === 'template'}
+                            onChange={() =>
+                              form.setValue('document_source', 'template', { shouldValidate: true })
+                            }
+                          />
+                          <span className="font-medium">Use template</span>
+                        </label>
+                        <label
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                            documentSource === 'manual_entry'
+                              ? 'border-primary bg-primary/5 text-foreground'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="document_source"
+                            value="manual_entry"
+                            className="h-4 w-4 shrink-0 accent-primary"
+                            checked={documentSource === 'manual_entry'}
+                            onChange={() =>
+                              form.setValue('document_source', 'manual_entry', { shouldValidate: true })
+                            }
+                          />
+                          <span className="font-medium">Manual entry</span>
+                        </label>
+                      </div>
+                    ) : (
+                      <div
+                        role="radiogroup"
+                        aria-labelledby="document-source-label"
+                        className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground"
+                      >
+                        External documents use <span className="font-medium text-foreground">manual file upload</span>{' '}
+                        only.
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Template loads body text from a catalogue entry. Manual entry starts with an empty editor; file
+                      upload below is optional.
+                    </p>
+                  </div>
                 </div>
-                <MemoEditor
-                  value={watchContent ?? ''}
-                  onChange={(val) => internalForm.setValue('content', val)}
-                />
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recipients (optional)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {fields.map((field, index) => (
-                <div key={field.id} className="flex flex-wrap gap-2 items-end">
-                  <div className="flex-1 min-w-[180px] space-y-1">
-                    <Label className="text-xs">User</Label>
+                {deliveryMode === 'workflow' && (
+                  <div className="space-y-2 max-w-2xl pt-1">
+                    <Label>
+                      Workflow <span className="text-destructive">*</span>
+                    </Label>
                     <Select
-                      value={internalForm.watch(`recipients.${index}.user_id`) || '__none__'}
+                      value={workflowTemplateId?.trim() ? workflowTemplateId : undefined}
                       onValueChange={(v) =>
-                        internalForm.setValue(`recipients.${index}.user_id`, v === '__none__' ? '' : v)
+                        form.setValue('workflow_template_id', v, { shouldValidate: true })
                       }
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select user" />
+                      <SelectTrigger
+                        className={cn(
+                          'w-full max-w-2xl',
+                          form.formState.errors.workflow_template_id ? 'border-destructive' : undefined
+                        )}
+                      >
+                        <SelectValue placeholder="Select a workflow" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">Select user</SelectItem>
-                        {users?.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.username}
+                        {workflowTemplates?.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {form.formState.errors.workflow_template_id && (
+                      <p className="text-xs text-destructive">
+                        {form.formState.errors.workflow_template_id.message}
+                      </p>
+                    )}
+                    {!workflowTemplates?.length && (
+                      <p className="text-xs text-destructive">
+                        No workflow templates found. Create one under Workflows before submitting into a workflow.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      This template is started after you submit the document into the workflow path.
+                    </p>
                   </div>
-                  <div className="w-28 space-y-1">
-                    <Label className="text-xs">Type</Label>
+                )}
+              </section>
+
+              {/* Document profile */}
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-profile">
+                <h3
+                  id="section-profile"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Document profile
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="document_date">Document date</Label>
+                    <Input
+                      id="document_date"
+                      type="date"
+                      error={!!form.formState.errors.document_date}
+                      {...form.register('document_date')}
+                    />
+                    {form.formState.errors.document_date && (
+                      <p className="text-xs text-destructive">{form.formState.errors.document_date.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Document receive date</Label>
+                    <Input value={receiveDateLabel} readOnly disabled className="bg-muted/60" />
+                    <p className="text-xs text-muted-foreground">Set automatically to today&apos;s date.</p>
+                  </div>
+                </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+              <div className="space-y-1.5 min-w-0">
+                <Label>Type</Label>
+                <Select
+                  value={documentType}
+                  onValueChange={(v) => form.setValue('document_type', v as CreateFormValues['document_type'])}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="internal">Internal</SelectItem>
+                    <SelectItem value="external">External</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5 min-w-0">
+                {documentType === 'internal' && documentSource === 'template' ? (
+                  <>
+                    <Label>
+                      Document template <span className="text-destructive">*</span>
+                    </Label>
                     <Select
-                      value={internalForm.watch(`recipients.${index}.recipient_type`)}
-                      onValueChange={(v) =>
-                        internalForm.setValue(`recipients.${index}.recipient_type`, v as RecipientType)
-                      }
+                      value={documentTemplateId?.trim() ? documentTemplateId : undefined}
+                      onValueChange={(v) => {
+                        lastAppliedDocumentTemplateId.current = null;
+                        form.setValue('document_template_id', v, { shouldValidate: true });
+                      }}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
+                      <SelectTrigger
+                        className={cn(
+                          'w-full',
+                          form.formState.errors.document_template_id ? 'border-destructive' : undefined
+                        )}
+                      >
+                        <SelectValue placeholder="Select a catalogue template" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="to">To</SelectItem>
-                        <SelectItem value="cc">CC</SelectItem>
-                        <SelectItem value="bcc">BCC</SelectItem>
+                        {documentTemplates?.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name} ({t.status})
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => append({ user_id: '', recipient_type: 'to' })}
-              >
-                <Plus className="h-4 w-4" /> Add recipient
-              </Button>
-            </CardContent>
-          </Card>
+                    {form.formState.errors.document_template_id && (
+                      <p className="text-xs text-destructive">
+                        {form.formState.errors.document_template_id.message}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Body updates when you change template (your edits are replaced).
+                    </p>
+                  </>
+                ) : documentType === 'internal' ? (
+                  <>
+                    <Label className="text-muted-foreground">Document template</Label>
+                    <div className="flex min-h-[36px] w-full items-center rounded-md border border-dashed border-muted-foreground/25 bg-muted/30 px-3 text-sm text-muted-foreground">
+                      Manual entry — empty editor, no catalogue template
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Label className="text-muted-foreground">Document template</Label>
+                    <div className="flex min-h-[36px] w-full items-center rounded-md border border-dashed border-muted-foreground/25 bg-muted/30 px-3 text-sm text-muted-foreground">
+                      External documents only
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
 
-          <div className="flex items-center justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => navigate('/documents')}>
-              Cancel
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setPreview(true)}>
-              <Eye className="h-4 w-4" /> Preview
-            </Button>
-            <Button type="submit" loading={internalMutation.isPending} disabled={!documentTemplateId?.trim()}>
-              Create document
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <form
-          onSubmit={externalForm.handleSubmit((d) => externalMutation.mutate(d))}
-          className="space-y-4"
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Upload PDF or DOCX</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="subject">
+                Subject <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="subject"
+                placeholder="Brief subject line"
+                error={!!form.formState.errors.subject}
+                {...form.register('subject')}
+              />
+              {form.formState.errors.subject && (
+                <p className="text-xs text-destructive">{form.formState.errors.subject.message}</p>
+              )}
+            </div>
+              </section>
+
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-content">
+                <h3
+                  id="section-content"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Content
+                </h3>
+            <div className="space-y-2">
+              <Label>Body</Label>
+              {documentType === 'internal' ? (
+                <MemoEditor
+                  key={documentSource === 'manual_entry' ? 'body-manual' : `body-template-${documentTemplateId || 'none'}`}
+                  hideLetterhead
+                  startBlank={documentSource === 'manual_entry'}
+                  value={bodyHtml ?? ''}
+                  onChange={(val) => form.setValue('body_html', val)}
+                />
+              ) : (
+                <textarea
+                  className={cn(
+                    'min-h-[160px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+                    'placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  )}
+                  placeholder="Optional cover note or summary for this external document"
+                  {...form.register('body_text_external')}
+                />
+              )}
+            </div>
+              </section>
+
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-parties">
+                <h3
+                  id="section-parties"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Parties
+                </h3>
+            <div className="space-y-2">
+              <Label>Sender details</Label>
+              <Button type="button" variant="outline" className="h-auto w-full justify-start gap-3 py-3 px-4" disabled>
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="text-left text-sm leading-snug">
+                  <span className="font-medium text-foreground">{senderLine}</span>
+                  <span className="block text-muted-foreground">{senderEmail}</span>
+                </span>
+              </Button>
+            </div>
+              </section>
+
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-files">
+                <h3
+                  id="section-files"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Classification &amp; attachments
+                </h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>File category</Label>
+                <Select
+                  value={form.watch('file_category')}
+                  onValueChange={(v) =>
+                    form.setValue('file_category', v as CreateFormValues['file_category'])
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="important">Important</SelectItem>
+                    <SelectItem value="secret">Secret</SelectItem>
+                    <SelectItem value="top_secret">Top secret</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Document priority</Label>
+                <Select
+                  value={form.watch('document_priority')}
+                  onValueChange={(v) =>
+                    form.setValue('document_priority', v as CreateFormValues['document_priority'])
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="important">Important</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="file_name">
+                  File name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="file_name"
+                  placeholder="e.g. Board memo on capitation"
+                  error={!!form.formState.errors.file_name}
+                  {...form.register('file_name')}
+                />
+                {form.formState.errors.file_name && (
+                  <p className="text-xs text-destructive">{form.formState.errors.file_name.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ref_code">File reference code</Label>
+                <Input id="ref_code" placeholder="Optional — auto if left blank" {...form.register('ref_code')} />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Document upload</Label>
               <div
                 {...getRootProps()}
                 className={cn(
@@ -546,115 +962,208 @@ export default function CreateDocumentPage() {
               >
                 <input {...getInputProps()} />
                 <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm font-medium">Drop file here or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF or DOCX · max 10 MB</p>
-                {externalFile && (
-                  <p className="text-sm text-primary mt-3 font-medium">{externalFile.name}</p>
+                <p className="text-sm font-medium">Drop a file here or click to browse</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  PDF or DOCX · max {documentType === 'internal' ? '5' : '10'} MB
+                  {documentType === 'internal' ? ' (optional attachment)' : ''}
+                </p>
+                {uploadFile && (
+                  <p className="text-sm text-primary mt-3 font-medium">{uploadFile.name}</p>
                 )}
               </div>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>
-                    Title <span className="text-destructive">*</span>
-                  </Label>
-                  <Input {...externalForm.register('title')} error={!!externalForm.formState.errors.title} />
-                  {externalForm.formState.errors.title && (
-                    <p className="text-xs text-destructive">{externalForm.formState.errors.title.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>
-                    Department <span className="text-destructive">*</span>
-                  </Label>
-                  <Input {...externalForm.register('department')} error={!!externalForm.formState.errors.department} />
-                  {externalForm.formState.errors.department && (
-                    <p className="text-xs text-destructive">{externalForm.formState.errors.department.message}</p>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ext-ref">Reference number (optional)</Label>
-                <Input
-                  id="ext-ref"
-                  placeholder="Auto-generated if empty"
-                  {...externalForm.register('ref_number')}
-                />
-              </div>
-            </CardContent>
-          </Card>
+              {documentType === 'external' && !uploadFile && (
+                <p className="text-xs text-muted-foreground">External documents require an uploaded file.</p>
+              )}
+            </div>
+              </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recipients</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {extRecipients.fields.map((field, index) => (
-                <div key={field.id} className="flex flex-wrap gap-2 items-end">
-                  <div className="flex-1 min-w-[180px] space-y-1">
-                    <Label className="text-xs">User</Label>
+            {showActionSection && (
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-direct">
+                <h3
+                  id="section-direct"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Direct message
+                </h3>
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Pick a rank or role first, then choose the user. Each option shows name, rank, and department.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Action</Label>
                     <Select
-                      value={externalForm.watch(`recipients.${index}.user_id`) || '__none__'}
-                      onValueChange={(v) =>
-                        externalForm.setValue(`recipients.${index}.user_id`, v === '__none__' ? '' : v)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select user" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Select user</SelectItem>
-                        {users?.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.username}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-28 space-y-1">
-                    <Label className="text-xs">Type</Label>
-                    <Select
-                      value={externalForm.watch(`recipients.${index}.recipient_type`)}
-                      onValueChange={(v) =>
-                        externalForm.setValue(`recipients.${index}.recipient_type`, v as RecipientType)
-                      }
+                      value={form.watch('action')}
+                      onValueChange={(v) => form.setValue('action', v as CreateFormValues['action'])}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="to">To</SelectItem>
-                        <SelectItem value="cc">CC</SelectItem>
-                        <SelectItem value="bcc">BCC</SelectItem>
+                        <SelectItem value="send">Send</SelectItem>
+                        <SelectItem value="draft">Save as draft</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => extRecipients.remove(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="space-y-1.5">
+                    <Label>
+                      Rank / role
+                      {form.watch('action') === 'send' ? (
+                        <span className="text-destructive"> *</span>
+                      ) : null}
+                      {form.watch('action') === 'draft' ? (
+                        <span className="text-muted-foreground font-normal"> (optional — narrows recipients)</span>
+                      ) : null}
+                    </Label>
+                    <Select
+                      value={form.watch('direct_recipient_rank')?.trim() || '__none__'}
+                      onValueChange={(v) => {
+                        const next = v === '__none__' ? '' : v;
+                        form.setValue('direct_recipient_rank', next, { shouldValidate: true });
+                        form.setValue('direct_recipient_user_id', '', { shouldValidate: true });
+                      }}
+                    >
+                      <SelectTrigger
+                        className={
+                          form.formState.errors.direct_recipient_rank ? 'border-destructive' : undefined
+                        }
+                      >
+                        <SelectValue placeholder="Select rank / role first" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">
+                          {form.watch('action') === 'draft' ? 'Any rank (show all)' : 'Select rank / role…'}
+                        </SelectItem>
+                        {rankFilterOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.formState.errors.direct_recipient_rank && (
+                      <p className="text-xs text-destructive">
+                        {form.formState.errors.direct_recipient_rank.message}
+                      </p>
+                    )}
+                    {!rankFilterOptions.length && recipientUsers.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Directory users have no rank set. Ask an admin to set rank on profiles, or use draft and pick
+                        from the full list.
+                      </p>
+                    )}
+                  </div>
                 </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => extRecipients.append({ user_id: '', recipient_type: 'to' })}
-              >
-                <Plus className="h-4 w-4" /> Add recipient
-              </Button>
-            </CardContent>
-          </Card>
 
-          <div className="flex justify-end gap-3 flex-wrap">
-            <Button type="button" variant="outline" onClick={() => navigate('/documents')}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={externalMutation.isPending} disabled={!externalFile}>
-              Upload document
-            </Button>
-          </div>
-        </form>
-      )}
+                <div className="space-y-1.5">
+                  <Label>
+                    Recipient
+                    {form.watch('action') === 'send' ? (
+                      <span className="text-destructive"> *</span>
+                    ) : null}
+                    {form.watch('action') === 'draft' ? (
+                      <span className="text-muted-foreground font-normal"> (optional for draft)</span>
+                    ) : null}
+                  </Label>
+                  <Select
+                    value={form.watch('direct_recipient_user_id') || '__none__'}
+                    disabled={
+                      form.watch('action') === 'send' && !form.watch('direct_recipient_rank')?.trim()
+                    }
+                    onValueChange={(v) =>
+                      form.setValue('direct_recipient_user_id', v === '__none__' ? '' : v, {
+                        shouldValidate: true,
+                      })
+                    }
+                  >
+                    <SelectTrigger
+                      className={
+                        form.formState.errors.direct_recipient_user_id ? 'border-destructive' : undefined
+                      }
+                    >
+                      <SelectValue
+                        placeholder={
+                          form.watch('action') === 'send' && !form.watch('direct_recipient_rank')?.trim()
+                            ? 'Choose rank / role first'
+                            : 'Select user (rank & department)'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select user</SelectItem>
+                      {filteredRecipientUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {recipientUserLabel(u)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {form.watch('action') === 'send' &&
+                    !!form.watch('direct_recipient_rank')?.trim() &&
+                    !filteredRecipientUsers.length && (
+                      <p className="text-xs text-muted-foreground">No users with this rank in the directory.</p>
+                    )}
+                  {form.formState.errors.direct_recipient_user_id && (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.direct_recipient_user_id.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+              </section>
+            )}
+
+              <section
+                className="flex flex-col gap-4 border-t border-border bg-muted/10 px-4 py-6 sm:px-6"
+                aria-label="Submit"
+              >
+                {documentType === 'internal' && documentSource === 'template' && !documentTemplates?.length && (
+                  <p className="text-sm text-destructive">
+                    No document template is available. Add a template under Template management (or open this page
+                    with ?document_template_id=…) before using template mode.
+                  </p>
+                )}
+                <div className="flex flex-wrap justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => navigate('/documents')}>
+                    Cancel
+                  </Button>
+                  {deliveryMode === 'workflow' ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        loading={submitMutation.isPending}
+                        disabled={submitDisabled}
+                        onClick={() => {
+                          form.setValue('action', 'draft');
+                          void form.handleSubmit((d) => submitMutation.mutate(d))();
+                        }}
+                      >
+                        Save as draft
+                      </Button>
+                      <Button
+                        type="button"
+                        loading={submitMutation.isPending}
+                        disabled={submitDisabled}
+                        onClick={() => {
+                          form.setValue('action', 'send');
+                          void form.handleSubmit((d) => submitMutation.mutate(d))();
+                        }}
+                      >
+                        Submit to workflow
+                      </Button>
+                    </>
+                  ) : (
+                    <Button type="submit" loading={submitMutation.isPending} disabled={submitDisabled}>
+                      Submit
+                    </Button>
+                  )}
+                </div>
+              </section>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
     </div>
   );
 }

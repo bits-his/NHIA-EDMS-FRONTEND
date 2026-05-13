@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, FileText, Search, SlidersHorizontal, X, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -10,18 +10,33 @@ import {
 import { PageHeader } from '@/components/shared/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ErrorState } from '@/components/shared/ErrorState';
-import { CardSkeleton } from '@/components/shared/Skeleton';
-import { DocumentCard } from '@/components/documents/DocumentCard';
+import { TableRowSkeleton } from '@/components/shared/Skeleton';
+import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { useAuthStore } from '@/stores/authStore';
 import { documentsApi } from '@/api/documents';
 import { canCreateDocument } from '@/utils/permissions';
 import { QUERY_KEYS } from '@/utils/constants';
-import type { DocumentCategory, DocumentStatus } from '@/types/document';
+import type { Document, DocumentCategory, DocumentStatus } from '@/types/document';
+import { formatRelative } from '@/utils/formatters';
+import { resolveUsername } from '@/utils/users';
+import { documentTypeHeadline, shouldShowTemplateTitleAsSubtitle } from '@/utils/documentDisplay';
 import { cn } from '@/utils/cn';
 
 const STATUS_ORDER: Record<DocumentStatus, number> = {
   pending: 0, draft: 1, rejected: 2, approved: 3, archived: 4,
 };
+
+function categoryLabel(c: DocumentCategory | null | undefined): string {
+  if (c === 'internal_memo') return 'Internal';
+  if (c === 'external_correspondence') return 'External';
+  return '—';
+}
+
+function urgencyLabel(u: Document['urgency']): string {
+  if (!u) return '—';
+  if (u === 'very_urgent') return 'Critical';
+  return u.charAt(0).toUpperCase() + u.slice(1);
+}
 
 export default function DocumentsPage() {
   const navigate = useNavigate();
@@ -194,8 +209,29 @@ export default function DocumentsPage() {
       {error ? (
         <ErrorState error={error} onRetry={refetch} />
       ) : isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <CardSkeleton key={i} />)}
+        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[860px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left font-semibold px-4 py-3">Document</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[100px]">Category</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Status</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Reference</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Department</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[100px]">Urgency</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[120px]">Owner</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[120px]">Updated</th>
+                  <th className="w-12 px-2 py-3" aria-hidden />
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <TableRowSkeleton key={i} cols={9} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : sorted.length === 0 ? (
         <EmptyState
@@ -205,8 +241,89 @@ export default function DocumentsPage() {
           action={canCreateDocument(user?.roles ?? [], user?.permissions ?? []) ? { label: 'Create Document', onClick: () => navigate('/documents/new') } : undefined}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sorted.map((doc) => <DocumentCard key={doc.id} document={doc} />)}
+        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[860px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left font-semibold px-4 py-3">Document</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[100px]">Category</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Status</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Reference</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[140px]">Department</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[100px]">Urgency</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[120px]">Owner</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[120px]">Updated</th>
+                  <th className="w-12 px-2 py-3" aria-hidden />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((doc) => {
+                  const pending = doc.status === 'pending';
+                  return (
+                    <tr
+                      key={doc.id}
+                      role="button"
+                      tabIndex={0}
+                      className={cn(
+                        'border-b border-border/80 last:border-0 cursor-pointer transition-colors',
+                        'hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                        pending && 'bg-amber-50/50 dark:bg-amber-950/15'
+                      )}
+                      onClick={() => navigate(`/documents/${doc.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/documents/${doc.id}`);
+                        }
+                      }}
+                    >
+                      <td className="px-4 py-3 align-top">
+                        <div className="min-w-0 max-w-[280px] sm:max-w-[360px]">
+                          <p className="font-medium text-foreground truncate">
+                            {documentTypeHeadline(doc)}
+                          </p>
+                          {shouldShowTemplateTitleAsSubtitle(doc) && (
+                            <p className="text-xs text-muted-foreground truncate mt-0.5" title={doc.title}>
+                              {doc.title}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground whitespace-nowrap">
+                        {categoryLabel(doc.category)}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <DocumentStatusBadge status={doc.status} size="sm" />
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        {doc.ref_number ? (
+                          <span className="font-mono text-xs text-muted-foreground">{doc.ref_number}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground max-w-[160px]">
+                        <span className="line-clamp-2">{doc.department?.trim() || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground whitespace-nowrap">
+                        {urgencyLabel(doc.urgency)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground text-xs capitalize max-w-[120px] truncate" title={resolveUsername(doc.owner_id)}>
+                        {resolveUsername(doc.owner_id)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground text-xs whitespace-nowrap">
+                        {formatRelative(doc.updated_at)}
+                      </td>
+                      <td className="px-2 py-3 align-middle text-muted-foreground">
+                        <ChevronRight className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

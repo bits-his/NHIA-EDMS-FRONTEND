@@ -12,13 +12,42 @@ export type StartWorkflowFromDocumentTemplateResult = {
 };
 
 /**
- * After a document is submitted for review: if its catalogue template assigns a workflow,
- * start that workflow once (no-op if an instance already exists for the document).
+ * After a document is submitted for review: if the document row stores
+ * `selected_workflow_template_id`, start that workflow once. Otherwise fall back
+ * to the workflow linked on the catalogue document template (if any).
  */
 export async function startWorkflowFromDocumentTemplate(
   documentId: string,
-  documentCatalogueTemplateId: string | null | undefined
+  documentCatalogueTemplateId: string | null | undefined,
+  explicitWorkflowTemplateId?: string | null | undefined
 ): Promise<StartWorkflowFromDocumentTemplateResult> {
+  const explicit = explicitWorkflowTemplateId?.trim();
+  if (explicit && UUID_REGEX.test(explicit)) {
+    const existing = await workflowApi.getInstanceByDocumentId(documentId);
+    if (existing) {
+      return {
+        started: false,
+        skippedNoWorkflowOnTemplate: false,
+        skippedAlreadyExists: true,
+      };
+    }
+    try {
+      await workflowApi.start({ template_id: explicit, document_id: documentId });
+      return {
+        started: true,
+        skippedNoWorkflowOnTemplate: false,
+        skippedAlreadyExists: false,
+      };
+    } catch (e) {
+      return {
+        started: false,
+        skippedNoWorkflowOnTemplate: false,
+        skippedAlreadyExists: false,
+        error: getErrorMessage(e),
+      };
+    }
+  }
+
   const tplId = documentCatalogueTemplateId?.trim();
   if (!tplId || !UUID_REGEX.test(tplId)) {
     return {

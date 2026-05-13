@@ -19,6 +19,12 @@ import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 interface MemoEditorProps {
   value: string;
   onChange: (value: string) => void;
+  /** When true, only the CKEditor is shown (no NHIA letterhead above the editable area). */
+  hideLetterhead?: boolean;
+  /**
+   * When true and `value` is empty, the editor starts with a single empty paragraph instead of the memo boilerplate.
+   */
+  startBlank?: boolean;
   /** Template document type catalogue label; letterhead omits the trailing word “Template”. */
   documentTypeLabel?: string;
   /** Letterhead address line: zone/state from organisational scope (with `letterheadZones`). */
@@ -109,21 +115,28 @@ function bindCheckboxClickSync(editor: {
 export default function MemoEditor({
   value,
   onChange,
+  hideLetterhead = false,
+  startBlank = false,
   documentTypeLabel,
   letterheadZoneCode,
   letterheadStateOfficeName,
   letterheadZones,
 }: MemoEditorProps) {
-  const initialData = normalizeEditorHtml(value || INITIAL_CONTENT);
+  const trimmed = value?.trim() ?? '';
+  const initialData = normalizeEditorHtml(
+    trimmed ? value : startBlank ? '<p></p>' : value || INITIAL_CONTENT
+  );
 
   return (
     <div className="border rounded-lg bg-white shadow-sm">
-      <NhiaMemoLetterhead
-        documentTypeLabel={documentTypeLabel}
-        zoneCode={letterheadZoneCode}
-        stateOfficeName={letterheadStateOfficeName}
-        zones={letterheadZones}
-      />
+      {!hideLetterhead ? (
+        <NhiaMemoLetterhead
+          documentTypeLabel={documentTypeLabel}
+          zoneCode={letterheadZoneCode}
+          stateOfficeName={letterheadStateOfficeName}
+          zones={letterheadZones}
+        />
+      ) : null}
 
       {/* Editor — min-height ensures the editable area is always visible */}
       <div className="[&_.ck-editor__editable]:min-h-[400px] [&_.ck-editor__editable]:px-8 [&_.ck-editor__editable]:py-4">
