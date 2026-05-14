@@ -24,7 +24,7 @@ import type { DocumentWorkflowAction } from '@/types/document';
 
 const ACTION_LABELS: Record<string, string> = {
   reject: 'Rejected',
-  edit_forward: 'Comment',
+  edit_forward: 'Note',
   approve_forward: 'Approved & forwarded',
   request_info: 'Requested more info',
   final_approve: 'Final approval',
@@ -33,6 +33,9 @@ const ACTION_LABELS: Record<string, string> = {
   review_send: 'Reviewed & sent',
   approve_send: 'Approved & sent',
 };
+
+/** Shown in the thread even when `comment` is empty (workflow milestones). */
+const ACTIONS_VISIBLE_WITHOUT_COMMENT = new Set(['final_approve', 'final_approval']);
 
 const ACTION_TONE: Record<string, string> = {
   reject: 'bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-900/20 dark:text-red-400 dark:ring-red-800',
@@ -55,8 +58,7 @@ const ACTION_TONE: Record<string, string> = {
 };
 
 /**
- * Direct-message action types. "Comment" is intentionally NOT here — leaving the
- * dropdown empty means a plain comment is posted (logged as `edit_forward`).
+ * Direct-message action types — one must always be chosen before posting.
  * The backend whitelist (`ALLOWED_DM_FORWARD_ACTIONS` + `ALLOWED_DM_TERMINAL_ACTIONS`)
  * must stay in sync.
  *
@@ -166,7 +168,12 @@ export function DocumentCommentsSection({
           : 'Your comment will be saved and the current workflow step will be completed.';
 
   const comments = useMemo(
-    () => (actions ?? []).filter((a) => (a.comment ?? '').trim().length > 0),
+    () =>
+      (actions ?? []).filter((a) => {
+        const hasComment = (a.comment ?? '').trim().length > 0;
+        if (hasComment) return true;
+        return ACTIONS_VISIBLE_WITHOUT_COMMENT.has(a.action);
+      }),
     [actions]
   );
 
@@ -217,9 +224,8 @@ export function DocumentCommentsSection({
   );
 
   /**
-   * Mirror the create page: when forwarding (action selected), a rank/role must be
-   * chosen before the recipient list is unlocked. With no action selected we never
-   * use these states, so the create-page "draft" branch (show all) doesn't apply.
+   * Mirror the create page: when forwarding, a rank/role must be chosen before the
+   * recipient list is unlocked.
    */
   const filteredNextUserCandidates = useMemo(() => {
     if (!nextUserRank.trim()) return [];
@@ -264,11 +270,15 @@ export function DocumentCommentsSection({
         await documentsApi.editForward(documentId, note);
         return workflowApi.advance(workflowInstanceId, note);
       }
+      const dmForward =
+        input.actionType === 'attach_send' ||
+        input.actionType === 'review_send' ||
+        input.actionType === 'approve_send';
       return documentsApi.editForward(
         documentId,
         input.text || undefined,
         input.actionType || undefined,
-        input.actionType ? input.nextUserId : undefined
+        dmForward ? input.nextUserId : undefined
       );
     },
     onSuccess: () => {
@@ -301,24 +311,40 @@ export function DocumentCommentsSection({
   });
 
   const trimmed = draft.trim();
-  /** Substance: either a comment, a file, or both. Comment-only is allowed when no action is selected. */
+  /** Non-DM / workflow: need a comment or attachment. DM: forward may be comment/file-less; terminal never requires body. */
   const hasSubstance = trimmed.length > 0 || !!selectedFile;
-  const canPost =
-    canComment &&
-    /** Terminal actions are self-sufficient — the action itself is the substance. */
-    (hasSubstance || isTerminalAction) &&
-    (!isForward || nextUserId.trim().length > 0) &&
-    !submitMutation.isPending;
+  const dmActionChosen = !isDirectMessage || actionType !== '';
+  const dmForwardReady =
+    !isDirectMessage || !isForward || nextUserId.trim().length > 0;
+  const dmSubstanceOrForwardOk =
+    !isDirectMessage || isTerminalAction || hasSubstance || isForward;
+
+  const allowSubmitContent = (() => {
+    if (isDirectMessage) {
+      return (
+        dmActionChosen &&
+        dmForwardReady &&
+        (isTerminalAction || hasSubstance || isForward)
+      );
+    }
+    if (canSubmitWorkflowAction) {
+      if (normalizedWorkflowAction === 'final_approve') return true;
+      return hasSubstance;
+    }
+    return hasSubstance;
+  })();
+
+  const canPost = canComment && allowSubmitContent && !submitMutation.isPending;
 
   return (
     <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-comments">
       <div className="flex items-center justify-between gap-3">
-        <h3
+          <h3
           id="section-comments"
           className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
         >
           <MessageSquare className="h-3.5 w-3.5" />
-          Comments {sortedComments.length > 0 ? `(${sortedComments.length})` : ''}
+          Comments and activity {sortedComments.length > 0 ? `(${sortedComments.length})` : ''}
         </h3>
       </div>
 
@@ -335,7 +361,7 @@ export function DocumentCommentsSection({
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground">
-                  Action type <span className="text-muted-foreground/70">(optional)</span>
+                  Action type <span className="text-destructive">*</span>
                 </Label>
                 <Select
                   value={actionType || undefined}
@@ -345,7 +371,7 @@ export function DocumentCommentsSection({
                   disabled={submitMutation.isPending}
                 >
                   <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Just comment — no forward" />
+                    <SelectValue placeholder="Select action type" />
                   </SelectTrigger>
                   <SelectContent>
                     {FORWARD_ACTION_OPTIONS.map((opt) => (
@@ -355,20 +381,6 @@ export function DocumentCommentsSection({
                     ))}
                   </SelectContent>
                 </Select>
-                {actionType && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActionType('');
-                      setNextUserRank('');
-                      setNextUserId('');
-                    }}
-                    className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                    disabled={submitMutation.isPending}
-                  >
-                    <X className="h-3 w-3" /> Clear action — post as comment
-                  </button>
-                )}
               </div>
 
               {isTerminalAction && (
@@ -468,7 +480,7 @@ export function DocumentCommentsSection({
                 : isForward
                   ? 'Add a note for the next recipient (optional)…'
                   : isDirectMessage
-                    ? 'Write a comment for the sender / other recipients…'
+                    ? 'Choose an action type above, then add a note or attachment if you wish…'
                     : canSubmitWorkflowAction
                       ? 'Write your comment before completing this workflow step…'
                       : 'Add a comment for the next approver / sender…'
@@ -523,27 +535,32 @@ export function DocumentCommentsSection({
               size="sm"
               disabled={!canPost}
               loading={submitMutation.isPending}
-              onClick={() =>
-                (hasSubstance || isTerminalAction) &&
+              onClick={() => {
+                if (!canPost) return;
                 submitMutation.mutate({
                   text: trimmed,
                   actionType,
                   nextUserId,
                   file: selectedFile,
-                })
-              }
+                });
+              }}
             >
               <Send className="h-3.5 w-3.5" />
               {canSubmitWorkflowAction
                 ? workflowSubmitLabel
-                : isTerminalAction
-                  ? 'Final approve'
-                  : isForward
-                    ? 'Send'
-                    : 'Post comment'}
+                : isDirectMessage && !actionType
+                  ? 'Select action type'
+                  : isTerminalAction
+                    ? 'Final approve'
+                    : isForward
+                      ? 'Send'
+                      : 'Post comment'}
             </Button>
           </div>
 
+          {isDirectMessage && !actionType && (
+            <p className="text-xs text-destructive">Select an action type to continue.</p>
+          )}
           {isForward && nextUserId === '' && (
             <p className="text-xs text-destructive">Pick the next user to forward to.</p>
           )}
@@ -590,9 +607,15 @@ export function DocumentCommentsSection({
                       {formatRelative(c.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
-                    {c.comment}
-                  </p>
+                  {(c.comment ?? '').trim() ? (
+                    <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                      {c.comment}
+                    </p>
+                  ) : ACTIONS_VISIBLE_WITHOUT_COMMENT.has(c.action) ? (
+                    <p className="text-sm text-muted-foreground italic leading-relaxed">
+                      No written comment — signature and filing are on the document.
+                    </p>
+                  ) : null}
                 </div>
               </li>
             );

@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { authApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { getErrorMessage } from '@/api/client';
+import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 
 const loginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
@@ -75,7 +76,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="relative z-10">
           <div className="inline-block bg-white rounded-xl px-4 py-2.5 shadow-lg">
-            <img src="/logo.png" alt="NHIA" className="h-10 w-auto object-contain" />
+            <img src={NHIA_LOGO_SRC} alt="NHIA" className="h-10 w-auto object-contain" />
           </div>
         </div>
 
@@ -112,7 +113,7 @@ export default function LoginPage() {
         <div className="w-full max-w-[380px]">
           {/* Mobile logo */}
           <div className="mb-8 lg:hidden">
-            <img src="/logo.png" alt="NHIA" className="h-9 w-auto object-contain" />
+            <img src={NHIA_LOGO_SRC} alt="NHIA" className="h-9 w-auto object-contain" />
           </div>
 
           {/* Heading */}

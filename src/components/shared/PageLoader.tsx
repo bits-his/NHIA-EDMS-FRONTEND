@@ -1,9 +1,11 @@
+import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
+
 export function PageLoader() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-5">
         <img
-          src="/logo.png"
+          src={NHIA_LOGO_SRC}
           alt="NHIA"
           className="h-10 w-auto object-contain opacity-80"
         />

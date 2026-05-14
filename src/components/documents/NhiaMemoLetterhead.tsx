@@ -1,3 +1,4 @@
+import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 import { cn } from '@/utils/cn';
 
 /** Strip catalogue suffix “ Template” for letterhead (word “Template” is not shown there). */
@@ -71,7 +72,11 @@ export function NhiaMemoLetterhead({
   return (
     <div className={cn('bg-white border-b px-8 py-6 text-center', className)}>
       <div className="flex items-center justify-center gap-5 sm:gap-6 mb-3">
-        <img src="/logo.png" alt="NHIA Logo" className="h-24 w-24 sm:h-28 sm:w-28 object-contain shrink-0" />
+        <img
+          src={NHIA_LOGO_SRC}
+          alt="NHIA"
+          className="h-24 w-24 sm:h-28 sm:w-28 object-contain shrink-0"
+        />
         <div className="text-left min-w-0">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
             Federal Republic of Nigeria

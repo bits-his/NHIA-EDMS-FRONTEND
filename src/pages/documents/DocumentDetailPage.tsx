@@ -67,7 +67,7 @@ import {
 import { getDocumentActions } from '@/utils/permissions';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { documentTypeHeadline, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
-import { buildDocumentExportHtml } from '@/utils/documentExport';
+import { buildDocumentExportHtml, inlineExportImagesInHtml } from '@/utils/documentExport';
 import { roleDisplayLabel } from '@/utils/recipientPicker';
 import type { RecipientType } from '@/types/document';
 import type { Role } from '@/types/auth';
@@ -372,10 +372,10 @@ export default function DocumentDetailPage() {
       return;
     }
     exportMutation.mutate(undefined, {
-      onSuccess: (letterheadHtml) => {
+      onSuccess: async (letterheadHtml) => {
         try {
           const usernameFor = (uid: string | null | undefined) => resolveUsername(uid);
-          const html = buildDocumentExportHtml({
+          let html = buildDocumentExportHtml({
             doc,
             letterheadHtml,
             recipients,
@@ -385,6 +385,7 @@ export default function DocumentDetailPage() {
             ownerName: resolveUsername(doc.owner_id),
             usernameFor,
           });
+          html = await inlineExportImagesInHtml(html);
           w.document.open();
           w.document.write(html);
           w.document.close();
@@ -1016,7 +1017,17 @@ export default function DocumentDetailPage() {
 
         <aside className="min-w-0 xl:sticky xl:top-4 space-y-4">
           <DocumentActivitySidebar
+            documentStatus={doc.status}
+            statusLabel={doc.status_label}
+            pendingStageLabel={pendingStageLabel}
+            refNumber={doc.ref_number}
+            documentTitle={doc.title?.trim() || 'Untitled document'}
+            ownerDisplayName={ownerName}
+            ownerRoleContext={ownerContext}
             createdAt={doc.created_at}
+            updatedAt={doc.updated_at}
+            categoryLabel={categoryLabel}
+            departmentDisplay={departmentName}
             actions={workflowActions}
             actionsLoading={workflowActionsLoading}
             versions={versions}

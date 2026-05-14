@@ -13,6 +13,7 @@ import {
   Users,
   Layers,
 } from 'lucide-react';
+import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 import { cn } from '@/utils/cn';
 import { canAccessTemplateManagement, canAccessAuditLogModule, canCreateDocument } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
@@ -72,7 +73,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           /* Expanded: actual logo on white pill */
           <div className="bg-white rounded-lg px-2 py-1">
             <img
-              src="/logo.png"
+              src={NHIA_LOGO_SRC}
               alt="NHIA Logo"
               className="h-14 w-auto object-contain"
             />

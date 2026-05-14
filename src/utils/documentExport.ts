@@ -1,4 +1,5 @@
 import { format, parseISO } from 'date-fns';
+import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 import type {
   Document,
   DocumentAttachment,
@@ -6,7 +7,6 @@ import type {
   DocumentVersion,
   DocumentWorkflowAction,
 } from '@/types/document';
-
 /**
  * Build a printable, self-contained HTML document for the in-tab "Export" view.
  *
@@ -62,7 +62,7 @@ const CLASSIFICATION_LABEL: Record<string, string> = {
 
 const ACTION_LABEL: Record<string, string> = {
   reject: 'Rejected',
-  edit_forward: 'Comment',
+  edit_forward: 'Note',
   approve_forward: 'Approved & forwarded',
   request_info: 'Requested information',
   final_approve: 'Final approval',
@@ -307,8 +307,10 @@ function additionalSectionsHtml({
 function bodyShell(doc: Document, bodyHtml: string): string {
   const title = escapeHtml(doc.title || 'Untitled document');
   const refLine = doc.ref_number ? `<p class="ref">Ref: ${escapeHtml(doc.ref_number)}</p>` : '';
+  const logoSrc = escapeHtml(NHIA_LOGO_SRC);
   return `
     <header class="doc-header">
+      <img class="export-doc-logo" src="${logoSrc}" alt="NHIA" />
       <h1>${title}</h1>
       ${refLine}
     </header>
@@ -326,6 +328,7 @@ const EXPORT_STYLES = `
   .toolbar button.primary { background: #1f2937; color: #ffffff; border-color: #1f2937; }
   .toolbar button:hover { background: #f3f4f6; }
   .toolbar button.primary:hover { background: #111827; }
+  .export-doc-logo { display: block; height: 44px; width: auto; max-width: 260px; object-fit: contain; margin: 0 0 14px; }
   .doc-header h1 { font-size: 22px; margin: 0 0 4px; color: #111827; }
   .doc-header .ref { margin: 0 0 16px; color: #6b7280; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .doc-body { font-size: 14px; line-height: 1.55; }
@@ -411,4 +414,73 @@ export function buildDocumentExportHtml(input: DocumentExportInput): string {
   </div>
 </body>
 </html>`;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Fetches same-origin `<img src="...">` resources and replaces them with `data:` URLs.
+ * Export HTML is opened in a new tab (`about:blank`), so paths like `/logo.png` do not
+ * resolve against the app origin — inlining fixes letterhead logos and body images for print/PDF.
+ */
+export async function inlineExportImagesInHtml(html: string): Promise<string> {
+  const trimmed = html.trim();
+  if (!trimmed) return html;
+  if (typeof window === 'undefined' || typeof DOMParser === 'undefined') return html;
+
+  try {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(trimmed, 'text/html');
+    const imgs = [...parsed.querySelectorAll('img[src]')];
+    const origin = window.location.origin;
+
+    await Promise.all(
+      imgs.map(async (img) => {
+        let src = img.getAttribute('src')?.trim();
+        if (src === '/logo.png') {
+          img.setAttribute('src', NHIA_LOGO_SRC);
+          src = NHIA_LOGO_SRC;
+        }
+        if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+
+        let absolute: string;
+        try {
+          absolute = new URL(src, origin).href;
+        } catch {
+          return;
+        }
+
+        let url: URL;
+        try {
+          url = new URL(absolute);
+        } catch {
+          return;
+        }
+        if (url.origin !== origin) return;
+
+        try {
+          const res = await fetch(url.href, { credentials: 'include' });
+          if (!res.ok) return;
+          const blob = await res.blob();
+          if (!blob.size) return;
+          const dataUrl = await blobToDataUrl(blob);
+          img.setAttribute('src', dataUrl);
+        } catch {
+          /* keep original src */
+        }
+      })
+    );
+
+    const doctype = trimmed.match(/^<!DOCTYPE[^>]*>/i)?.[0] ?? '<!DOCTYPE html>';
+    return `${doctype}\n${parsed.documentElement.outerHTML}`;
+  } catch {
+    return html;
+  }
 }
