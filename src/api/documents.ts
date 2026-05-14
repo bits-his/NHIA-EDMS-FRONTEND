@@ -165,6 +165,20 @@ export const documentsApi = {
     return res.data;
   },
 
+  /** Owner only: pending → draft; pauses active workflow when present. */
+  recall: async (id: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/recall`);
+    return res.data;
+  },
+
+  /** Owner only: workflow-backed pending doc — moves current-step task to another user. */
+  reassign: async (id: string, assigneeUserId: string): Promise<Document> => {
+    const res = await documentClient.post<Document>(`/documents/${id}/reassign`, {
+      assignee_user_id: assigneeUserId,
+    });
+    return res.data;
+  },
+
   /** Pending → approved (generic transition). Does not append an e-signature to document HTML. */
   approve: async (id: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve`);
