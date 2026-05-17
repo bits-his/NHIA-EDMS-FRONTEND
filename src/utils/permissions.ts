@@ -215,11 +215,36 @@ export function canDirectorToggleOperationalDashboard(roles: string[]): boolean 
   return hasRoleInSet(roles, DIRECTOR_DASHBOARD_TOGGLE_ROLE_NAMES);
 }
 
+/** Director General (DGO) — JWT role `executive_secretary`. */
+export function isDirectorGeneralRole(roles: string[]): boolean {
+  return hasRoleInSet(roles, DIRECTOR_GENERAL_ROLE_NAMES);
+}
+
+/** NHIA director grade roles (excludes DGO unless also `executive_secretary`). */
+export function isDirectorGradeRole(roles: string[]): boolean {
+  return hasRoleInSet(roles, DIRECTOR_GRADE_ROLE_NAMES);
+}
+
 /**
  * Full **Audit Log** app area (`/audit` sidebar + route). Restricted to legacy `director`,
  * NHIA **Director General** grade (`general_manager` JWT role), and `admin` only.
  */
-const AUDIT_LOG_MODULE_ROLE_NAMES = new Set(['admin', 'director', 'general_manager']);
+const AUDIT_LOG_MODULE_ROLE_NAMES = new Set([
+  'admin',
+  'director',
+  'general_manager',
+  'executive_secretary',
+]);
+
+const DIRECTOR_GENERAL_ROLE_NAMES = new Set(['executive_secretary']);
+
+const DIRECTOR_GRADE_ROLE_NAMES = new Set([
+  'director',
+  'sdo_director',
+  'general_manager',
+  'deputy_general_manager',
+  'assistant_general_manager',
+]);
 
 export function canAccessAuditLogModule(roles: string[] | undefined | null): boolean {
   if (!roles?.length) return false;

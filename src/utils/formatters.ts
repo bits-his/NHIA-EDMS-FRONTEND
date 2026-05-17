@@ -1,4 +1,7 @@
-import { format, formatDistanceToNow, isAfter, parseISO } from 'date-fns';
+import { addDays, format, formatDistanceToNow, isAfter, parseISO } from 'date-fns';
+
+/** Staff must act on an assigned document within this many days (matches backend SLA). */
+export const ASSIGNMENT_DUE_DAYS = 3;
 
 export function formatDate(dateStr: string): string {
   try {
@@ -24,13 +27,84 @@ export function formatRelative(dateStr: string): string {
   }
 }
 
-export function isOverdue(dueDateStr?: string): boolean {
-  if (!dueDateStr) return false;
+/** Effective due date from persisted due_date or assignment time + SLA days. */
+export function effectiveDueDate(
+  dueDateStr?: string | null,
+  assignedAtStr?: string | null
+): string | null {
+  if (dueDateStr?.trim()) return dueDateStr;
+  if (!assignedAtStr?.trim()) return null;
   try {
-    return isAfter(new Date(), parseISO(dueDateStr));
+    return addDays(parseISO(assignedAtStr), ASSIGNMENT_DUE_DAYS).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+export function isOverdue(dueDateStr?: string | null, assignedAtStr?: string | null): boolean {
+  const due = effectiveDueDate(dueDateStr, assignedAtStr);
+  if (!due) return false;
+  try {
+    return isAfter(new Date(), parseISO(due));
   } catch {
     return false;
   }
+}
+
+export function isTaskOverdue(task: {
+  due_date?: string | null;
+  created_at?: string;
+  status?: string;
+  is_overdue?: boolean;
+}): boolean {
+  if (task.is_overdue === true) return true;
+  if (task.status === 'completed' || task.status === 'cancelled') return false;
+  return isOverdue(task.due_date, task.created_at);
+}
+
+export function isDirectMessageAssignmentOverdue(assignedAtStr?: string | null): boolean {
+  if (!assignedAtStr?.trim()) return false;
+  return isOverdue(null, assignedAtStr);
+}
+
+/** Whether the current user's assignment on this document is past the SLA. */
+export function isDocumentAssignmentOverdue(
+  doc: { id: string; status: string; delivery_mode?: string | null; owner_id?: string | null; updated_at?: string },
+  options: {
+    userId?: string;
+    tasks?: Array<{
+      document_id?: string | null;
+      assignee_id?: string;
+      status?: string;
+      due_date?: string | null;
+      created_at?: string;
+      is_overdue?: boolean;
+    }>;
+    isDirectMessageRecipient?: boolean;
+    directMessageAssignedAt?: string | null;
+  }
+): boolean {
+  if (doc.status !== 'pending' || !options.userId) return false;
+
+  const task = options.tasks?.find(
+    (t) =>
+      t.document_id === doc.id &&
+      t.assignee_id === options.userId &&
+      (t.status === 'pending' || t.status === 'in_progress')
+  );
+  if (task) return isTaskOverdue(task);
+
+  if (
+    doc.delivery_mode === 'direct_message' &&
+    options.isDirectMessageRecipient &&
+    doc.owner_id !== options.userId
+  ) {
+    return isDirectMessageAssignmentOverdue(
+      options.directMessageAssignedAt ?? doc.updated_at ?? null
+    );
+  }
+
+  return false;
 }
 
 export function truncate(str: string, maxLength: number): string {

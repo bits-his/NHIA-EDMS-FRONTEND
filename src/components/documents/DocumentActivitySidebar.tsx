@@ -129,6 +129,7 @@ interface DocumentActivitySidebarProps {
   documentStatus: DocumentStatus;
   statusLabel?: string | null;
   pendingStageLabel?: string | null;
+  assignmentOverdue?: boolean;
   refNumber?: string | null;
   documentTitle: string;
   ownerDisplayName: string;
@@ -147,6 +148,7 @@ export function DocumentActivitySidebar({
   documentStatus,
   statusLabel,
   pendingStageLabel,
+  assignmentOverdue = false,
   refNumber,
   documentTitle,
   ownerDisplayName,
@@ -162,10 +164,10 @@ export function DocumentActivitySidebar({
 }: DocumentActivitySidebarProps) {
   const [headerExpanded, setHeaderExpanded] = useState(true);
 
-  const statusHeadline = useMemo(
-    () => resolveStatusHeadline(documentStatus, statusLabel, pendingStageLabel),
-    [documentStatus, statusLabel, pendingStageLabel]
-  );
+  const statusHeadline = useMemo(() => {
+    const base = resolveStatusHeadline(documentStatus, statusLabel, pendingStageLabel);
+    return assignmentOverdue ? `${base} · Overdue` : base;
+  }, [documentStatus, statusLabel, pendingStageLabel, assignmentOverdue]);
 
   const recordLine = useMemo(
     () => buildUppercaseRecordLine(refNumber, documentTitle, ownerDisplayName, ownerRoleContext),
@@ -190,7 +192,10 @@ export function DocumentActivitySidebar({
               )}
             </span>
             <span
-              className="min-w-0 flex-1 text-base font-semibold leading-snug text-foreground line-clamp-2"
+              className={cn(
+                'min-w-0 flex-1 text-base font-semibold leading-snug line-clamp-2',
+                assignmentOverdue && 'text-red-700 dark:text-red-400'
+              )}
               title={statusHeadline}
             >
               {statusHeadline}
@@ -206,31 +211,32 @@ export function DocumentActivitySidebar({
                 {recordLine}
               </p>
 
-              <Tabs defaultValue="summary" className="w-full">
+              <Tabs defaultValue="action" className="w-full">
                 <TabsList
                   className={cn(
                     'w-full h-auto justify-start gap-0 rounded-none border-0 bg-transparent p-0',
                     'border-b border-border/60'
                   )}
                 >
-                  <TabsTrigger
-                    value="summary"
-                    className={cn(
-                      'rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm font-medium',
-                      'data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none'
-                    )}
-                  >
-                    Summary
-                  </TabsTrigger>
-                  <TabsTrigger
+                   <TabsTrigger
                     value="action"
                     className={cn(
                       'rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm font-medium',
-                      'data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none'
+                      'data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none'
                     )}
                   >
                     Action History
                   </TabsTrigger>
+                  <TabsTrigger
+                    value="summary"
+                    className={cn(
+                      'rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm font-medium',
+                      'data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none'
+                    )}
+                  >
+                    Summary
+                  </TabsTrigger>
+                 
                 </TabsList>
 
                 <TabsContent value="summary" className="m-0 px-3 py-3 space-y-3 focus-visible:outline-none">

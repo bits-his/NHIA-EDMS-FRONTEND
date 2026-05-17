@@ -34,6 +34,7 @@ import { documentsApi } from '@/api/documents';
 import { tasksApi } from '@/api/tasks';
 import { QUERY_KEYS, SEEDED_USER_IDS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
+import { formatDateTime } from '@/utils/formatters';
 import { getErrorMessage } from '@/api/client';
 import type { Role } from '@/types/auth';
 import type { UserRecord } from '@/api/auth';
@@ -166,6 +167,248 @@ const NHIA_RANK_FALLBACK_OPTIONS = [
 
 const SELECT_NONE = '__none__';
 
+function displayOrDash(value: string | number | boolean | null | undefined): string {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  if (value == null) return '—';
+  const s = String(value).trim();
+  return s.length > 0 ? s : '—';
+}
+
+function userPrimaryLabel(u: UserRecord): string {
+  const name = u.full_name?.trim();
+  return name || u.username;
+}
+
+function supervisorLabelFor(u: UserRecord, usersById: Map<string, UserRecord>): string {
+  const supervisor = u.supervisor_id ? usersById.get(u.supervisor_id) : undefined;
+  if (!supervisor) return '—';
+  const label = userPrimaryLabel(supervisor);
+  return supervisor.username !== label ? `${label} (@${supervisor.username})` : label;
+}
+
+function UserRolesBadges({ u, allRoles }: { u: UserRecord; allRoles: Role[] | undefined }) {
+  if (!u.roles.length) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1 min-w-[10rem] max-w-[14rem]">
+      {u.roles.map((r) => {
+        const def = allRoles?.find((x) => x.id === r.id);
+        const label = roleDisplayLabel(def ?? r);
+        return (
+          <span
+            key={r.id}
+            className={cn(
+              'text-[10px] font-semibold px-1.5 py-0.5 rounded-full capitalize whitespace-nowrap',
+              ROLE_COLORS[r.name] ?? 'bg-muted text-muted-foreground'
+            )}
+          >
+            {label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+const TH =
+  'text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap';
+const TD = 'px-4 py-3 align-top text-sm whitespace-nowrap';
+const TD_WRAP = 'px-4 py-3 align-top text-sm max-w-[12rem]';
+const TD_MONO = 'px-4 py-3 align-top text-xs font-mono text-muted-foreground max-w-[9rem] truncate';
+
+function UsersTable({
+  users,
+  allRoles,
+  usersById,
+  taskMap,
+  showTaskCounts,
+  canManageUsers,
+  canViewAuditNav,
+  onEditProfile,
+  onManageRoles,
+  onResetPassword,
+  onDeactivate,
+  onViewAudit,
+}: {
+  users: UserRecord[];
+  allRoles: Role[] | undefined;
+  usersById: Map<string, UserRecord>;
+  taskMap: Record<string, number> | undefined;
+  showTaskCounts: boolean;
+  canManageUsers: boolean;
+  canViewAuditNav: boolean;
+  onEditProfile: (u: UserRecord) => void;
+  onManageRoles: (u: UserRecord) => void;
+  onResetPassword: (u: UserRecord) => void;
+  onDeactivate: (u: UserRecord) => void;
+  onViewAudit: () => void;
+}) {
+  const showActions = canManageUsers || canViewAuditNav;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[120rem]">
+        <thead>
+          <tr className="border-b border-border bg-muted/30">
+            <th className={TH}>Username</th>
+            <th className={TH}>Full name</th>
+            <th className={TH}>Email</th>
+            <th className={TH}>Phone</th>
+            <th className={TH}>Rank</th>
+            <th className={TH}>Department</th>
+            <th className={TH}>Unit</th>
+            <th className={TH}>Zone</th>
+            <th className={TH}>State</th>
+            <th className={TH}>Staff ID</th>
+            <th className={TH}>Employment</th>
+            <th className={TH}>Account</th>
+            <th className={TH}>Clearance</th>
+            <th className={TH}>Grade</th>
+            <th className={TH}>Roles</th>
+            <th className={TH}>Primary role</th>
+            <th className={cn(TH, 'min-w-[10rem]')}>Supervisor</th>
+            <th className={TH}>MFA</th>
+            <th className={TH}>Photo</th>
+            <th className={TH}>Signature</th>
+            {showTaskCounts && <th className={TH}>Tasks</th>}
+            <th className={TH}>Member since</th>
+            <th className={TH}>Last login</th>
+            <th className={TH}>Dept ID</th>
+            <th className={TH}>Unit ID</th>
+            <th className={TH}>State office ID</th>
+            <th className={TH}>Zone ID</th>
+            <th className={TH}>Directorate ID</th>
+            <th className={TH}>User ID</th>
+            {showActions && (
+              <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right')}>Actions</th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((u, idx) => {
+            const primaryRole = u.primary_role_id ? allRoles?.find((r) => r.id === u.primary_role_id) : undefined;
+            const taskCount = taskMap?.[u.id] ?? 0;
+
+            return (
+              <tr
+                key={u.id}
+                className={cn(
+                  'border-b border-border/50 last:border-0 hover:bg-muted/20',
+                  idx % 2 !== 0 && 'bg-muted/10'
+                )}
+              >
+                <td className={cn(TD, 'font-medium capitalize')}>{displayOrDash(u.username)}</td>
+                <td className={TD_WRAP}>{displayOrDash(u.full_name)}</td>
+                <td className={TD}>{displayOrDash(u.email)}</td>
+                <td className={TD}>{displayOrDash(u.phone)}</td>
+                <td className={TD_WRAP}>{displayOrDash(u.rank)}</td>
+                <td className={TD_WRAP}>{displayOrDash(u.department)}</td>
+                <td className={TD_WRAP}>{displayOrDash(u.unit)}</td>
+                <td className={TD}>{displayOrDash(u.zone)}</td>
+                <td className={TD_WRAP}>{displayOrDash(u.state)}</td>
+                <td className={TD}>{displayOrDash(u.staff_id)}</td>
+                <td className={TD}>{displayOrDash(u.employment_type)}</td>
+                <td className={TD}>{displayOrDash(u.account_status)}</td>
+                <td className={TD}>{displayOrDash(u.clearance_level)}</td>
+                <td className={TD}>{displayOrDash(u.grade_level)}</td>
+                <td className="px-4 py-3 align-top">
+                  <UserRolesBadges u={u} allRoles={allRoles} />
+                </td>
+                <td className={TD_WRAP}>
+                  {primaryRole ? roleDisplayLabel(primaryRole) : '—'}
+                </td>
+                <td className={cn(TD_WRAP, 'whitespace-normal min-w-[10rem]')}>
+                  {supervisorLabelFor(u, usersById)}
+                </td>
+                <td className={TD}>{displayOrDash(u.mfa_enabled)}</td>
+                <td className={TD}>{displayOrDash(u.photo_path?.trim() ? 'Yes' : null)}</td>
+                <td className={TD}>{displayOrDash(u.signature_path?.trim() ? 'Yes' : null)}</td>
+                {showTaskCounts && (
+                  <td className={TD}>
+                    {taskCount > 0 ? (
+                      <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
+                        {taskCount}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                )}
+                <td className={cn(TD, 'tabular-nums text-xs')}>
+                  {u.created_at ? formatDateTime(u.created_at) : '—'}
+                </td>
+                <td className={cn(TD, 'tabular-nums text-xs')}>
+                  {u.last_login_at ? formatDateTime(u.last_login_at) : '—'}
+                </td>
+                <td className={TD_MONO} title={u.nhia_department_id ?? undefined}>
+                  {displayOrDash(u.nhia_department_id)}
+                </td>
+                <td className={TD_MONO} title={u.nhia_unit_id ?? undefined}>
+                  {displayOrDash(u.nhia_unit_id)}
+                </td>
+                <td className={TD_MONO} title={u.nhia_state_office_id ?? undefined}>
+                  {displayOrDash(u.nhia_state_office_id)}
+                </td>
+                <td className={TD_MONO} title={u.nhia_zone_id ?? undefined}>
+                  {displayOrDash(u.nhia_zone_id)}
+                </td>
+                <td className={TD_MONO} title={u.nhia_directorate_id ?? undefined}>
+                  {displayOrDash(u.nhia_directorate_id)}
+                </td>
+                <td className={TD_MONO} title={u.id}>
+                  {u.id}
+                </td>
+                {showActions && (
+                  <td
+                    className={cn(
+                      'px-4 py-3 align-top sticky right-0 z-10 text-right',
+                      idx % 2 !== 0 ? 'bg-muted/10' : 'bg-card'
+                    )}
+                  >
+                    <div className="flex items-center justify-end gap-0.5">
+                      {canManageUsers && (
+                        <>
+                          <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => onEditProfile(u)}>
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" title="Manage roles" onClick={() => onManageRoles(u)}>
+                            <Shield className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => onResetPassword(u)}>
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                      {canViewAuditNav && (
+                        <Button variant="ghost" size="icon-sm" title="View audit logs" onClick={onViewAudit}>
+                          <Activity className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {canManageUsers && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Deactivate user"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => onDeactivate(u)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function UsersPage() {
   const navigate = useNavigate();
@@ -209,6 +452,11 @@ export default function UsersPage() {
   });
 
   const gradeRoles = useMemo(() => gradeRolesSorted(allRoles), [allRoles]);
+
+  const usersById = useMemo(
+    () => new Map((users ?? []).map((u) => [u.id, u])),
+    [users]
+  );
 
   // Task counts per user
   const { data: taskMap } = useQuery({
@@ -288,76 +536,28 @@ export default function UsersPage() {
       <div className="space-y-3">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Users</h2>
         <Card>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             {isLoading ? (
               <div className="p-5 space-y-3">
-                {[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}
+                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
               </div>
             ) : !users?.length ? (
               <EmptyState icon={Users} title="No users found" description="Create the first user to get started" />
             ) : (
-              <div className="divide-y divide-border">
-                {users.map((u) => (
-                  <div key={u.id} className="flex items-center justify-between px-5 py-4 hover:bg-muted/30 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold uppercase">
-                        {u.username.slice(0, 2)}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold capitalize">{u.username}</p>
-                          {u.roles.map((r) => {
-                            const def = allRoles?.find((x) => x.id === r.id);
-                            const label = roleDisplayLabel(def ?? r);
-                            return (
-                              <span key={r.id} className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded-full capitalize', ROLE_COLORS[r.name] ?? 'bg-muted text-muted-foreground')}>
-                                {label}
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{u.email}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {(taskMap?.[u.id] ?? 0) > 0 && (
-                        <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-                          {taskMap![u.id]} active tasks
-                        </span>
-                      )}
-                      {canManageUsers && (
-                      <>
-                      <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => setEditProfileUser(u)}>
-                        <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" title="Manage roles" onClick={() => setManageRolesUser(u)}>
-                        <Shield className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => setResetPwUser(u)}>
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                      </>
-                      )}
-                      {canViewAuditNav && (
-                      <Button variant="ghost" size="icon-sm" title="View audit logs" onClick={() => navigate('/audit')}>
-                        <Activity className="h-3.5 w-3.5" />
-                      </Button>
-                      )}
-                      {canManageUsers && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Deactivate user"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => setDeactivateUser(u)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <UsersTable
+                users={users}
+                allRoles={allRoles}
+                usersById={usersById}
+                taskMap={taskMap}
+                showTaskCounts={showTaskCounts}
+                canManageUsers={canManageUsers}
+                canViewAuditNav={canViewAuditNav}
+                onEditProfile={setEditProfileUser}
+                onManageRoles={setManageRolesUser}
+                onResetPassword={setResetPwUser}
+                onDeactivate={setDeactivateUser}
+                onViewAudit={() => navigate('/audit')}
+              />
             )}
           </CardContent>
         </Card>

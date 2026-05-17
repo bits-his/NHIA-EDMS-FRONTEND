@@ -7,6 +7,7 @@ import { PageLoader } from '@/components/shared/PageLoader';
 // Lazy-loaded pages
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
+const ExecutiveReportPage = lazy(() => import('@/pages/dashboard/ExecutiveReportPage'));
 const DocumentsPage = lazy(() => import('@/pages/documents/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('@/pages/documents/DocumentDetailPage'));
 const CreateDocumentPage = lazy(() => import('@/pages/documents/CreateDocumentPage'));
@@ -51,6 +52,14 @@ const routerConfig = [
         element: (
           <Wrap>
             <DashboardPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'dashboard/reports',
+        element: (
+          <Wrap>
+            <ExecutiveReportPage />
           </Wrap>
         ),
       },

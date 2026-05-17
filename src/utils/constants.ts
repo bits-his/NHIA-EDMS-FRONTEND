@@ -70,6 +70,8 @@ export const QUERY_KEYS = {
   tasks: (assigneeId: string) => ['tasks', assigneeId],
   /** All workflow tasks (requires director/reviewer/admin on task agent). */
   tasksOperationalAll: () => ['tasks', 'operational', 'all'] as const,
+  executive360: (variant: string) => ['executive', '360', variant] as const,
+  executiveReport: (params: Record<string, string>) => ['executive', 'report', params] as const,
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
   auditLogsMyTrail: (userId: string, limit: number) => ['audit-logs', 'my-trail', userId, limit] as const,

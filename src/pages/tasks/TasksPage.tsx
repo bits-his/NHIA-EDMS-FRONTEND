@@ -10,7 +10,7 @@ import { tasksApi } from '@/api/tasks';
 import { documentsApi } from '@/api/documents';
 import { useAuthStore } from '@/stores/authStore';
 import { QUERY_KEYS } from '@/utils/constants';
-import { formatRelative, isOverdue } from '@/utils/formatters';
+import { formatRelative, isTaskOverdue } from '@/utils/formatters';
 import type { TaskStatus, Task } from '@/types/task';
 import { cn } from '@/utils/cn';
 import { documentTypeHeadline } from '@/utils/documentDisplay';
@@ -95,7 +95,7 @@ export default function TasksPage() {
 }
 
 function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
-  const overdue = isOverdue(task.due_date) && task.status !== 'completed' && task.status !== 'cancelled';
+  const overdue = isTaskOverdue(task);
 
   const { data: document } = useQuery({
     queryKey: QUERY_KEYS.document(task.document_id ?? ''),

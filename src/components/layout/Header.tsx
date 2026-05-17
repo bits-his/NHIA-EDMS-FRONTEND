@@ -21,6 +21,7 @@ import { formatAuthRolesForDisplay, workflowAssigneeRoleLabel } from '@/utils/wo
 // Map route paths to human-readable breadcrumb labels
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:     'Dashboard',
+  reports:       'Executive report',
   documents:     'Documents',
   tasks:         'My Tasks',
   audit:         'Audit Log',

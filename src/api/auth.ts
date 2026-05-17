@@ -20,6 +20,23 @@ export interface UserRecord {
   department?: string | null;
   zone?: string | null;
   state?: string | null;
+  unit?: string | null;
+  photo_path?: string | null;
+  signature_path?: string | null;
+  staff_id?: string | null;
+  employment_type?: string | null;
+  supervisor_id?: string | null;
+  account_status?: string | null;
+  clearance_level?: string | null;
+  mfa_enabled?: boolean | null;
+  last_login_at?: string | null;
+  nhia_department_id?: string | null;
+  nhia_unit_id?: string | null;
+  nhia_state_office_id?: string | null;
+  nhia_zone_id?: string | null;
+  nhia_directorate_id?: string | null;
+  grade_level?: string | number | null;
+  primary_role_id?: string | null;
 }
 
 export const authApi = {

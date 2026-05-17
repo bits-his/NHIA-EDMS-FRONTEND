@@ -6,10 +6,7 @@ import {
   Clock,
   User,
   FileText,
-  Shield,
-  Hash,
   FileDown,
-  Users,
   Paperclip,
   Building2,
   Tag,
@@ -21,12 +18,12 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -47,15 +44,13 @@ import { DocumentActivitySidebar } from '@/components/documents/DocumentActivity
 import { DocumentCommentsSection } from '@/components/documents/DocumentCommentsSection';
 import { DocumentDiscussionsPanel } from '@/components/documents/DocumentDiscussionsPanel';
 import { WorkflowBpmnPanel } from '@/components/documents/WorkflowBpmnPanel';
-import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { documentsApi } from '@/api/documents';
-import { auditApi } from '@/api/audit';
 import { authApi, type UserRecord } from '@/api/auth';
 import { tasksApi } from '@/api/tasks';
 import { workflowApi } from '@/api/workflow';
 import { useAuthStore } from '@/stores/authStore';
 import { QUERY_KEYS } from '@/utils/constants';
-import { formatDateTime, formatRelative } from '@/utils/formatters';
+import { formatDateTime, formatRelative, isDocumentAssignmentOverdue } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
 import { isUuid } from '@/utils/uuid';
@@ -95,12 +90,6 @@ const DELIVERY_LABEL: Record<string, string> = {
   direct_message: 'Direct message',
 };
 
-const RECIPIENT_TYPE_TONE: Record<string, string> = {
-  to: 'bg-primary/10 text-primary',
-  cc: 'bg-muted text-muted-foreground',
-  bcc: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
-};
-
 function userDisplayName(profile: UserRecord | undefined, fallback: string): string {
   return profile?.full_name?.trim() || profile?.username?.trim() || fallback;
 }
@@ -117,6 +106,43 @@ function userRoleContext(profile: UserRecord | undefined, roles: Role[] | undefi
   return parts.join(', ');
 }
 
+function DocumentDetailToolbar({
+  onBack,
+  onOpenProfile,
+  onOpenWorkflow,
+  showWorkflow = false,
+}: {
+  onBack: () => void;
+  onOpenProfile?: () => void;
+  onOpenWorkflow?: () => void;
+  showWorkflow?: boolean;
+}) {
+  return (
+    <div
+      className="inline-flex flex-wrap items-center rounded-lg border border-border/70 bg-muted/25 p-1 gap-0.5"
+      role="toolbar"
+      aria-label="Document navigation"
+    >
+      <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={onBack}>
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </Button>
+      {onOpenProfile && (
+        <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={onOpenProfile}>
+          <FileText className="h-4 w-4" />
+          Document profile
+        </Button>
+      )}
+      {showWorkflow && onOpenWorkflow && (
+        <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={onOpenWorkflow}>
+          <GitBranch className="h-4 w-4" />
+          View workflow
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export default function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -125,6 +151,8 @@ export default function DocumentDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [recipientOpen, setRecipientOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [workflowOpen, setWorkflowOpen] = useState(false);
   const [recipientUserId, setRecipientUserId] = useState('');
   const [recipientType, setRecipientType] = useState<RecipientType>('to');
 
@@ -243,19 +271,6 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid,
   });
 
-  const {
-    data: auditLogs,
-    isLoading: auditLoading,
-    isError: auditIsError,
-    error: auditError,
-    refetch: refetchAudit,
-  } = useQuery({
-    queryKey: QUERY_KEYS.auditLogsForDocument(id!),
-    queryFn: () => auditApi.getLogsForDocument(id!),
-    enabled: documentIdValid,
-    retry: 1,
-  });
-
   const { data: recipients } = useQuery({
     queryKey: QUERY_KEYS.documentRecipients(id!),
     queryFn: () => documentsApi.listRecipients(id!),
@@ -277,6 +292,26 @@ export default function DocumentDetailPage() {
     !!currentDirectMessageRecipientId &&
     doc?.delivery_mode === 'direct_message' &&
     currentDirectMessageRecipientId === user.user_id;
+
+  const directMessageAssignedAt = useMemo(() => {
+    if (!recipients?.length || !user?.user_id) return null;
+    const mine = recipients.filter((r) => r.user_id === user.user_id);
+    if (!mine.length) return null;
+    const latest = [...mine].sort(
+      (a, b) => new Date(b.created_at ?? '').getTime() - new Date(a.created_at ?? '').getTime()
+    )[0];
+    return latest?.created_at ?? null;
+  }, [recipients, user?.user_id]);
+
+  const assignmentOverdue = useMemo(() => {
+    if (!doc) return false;
+    return isDocumentAssignmentOverdue(doc, {
+      userId: user?.user_id,
+      tasks: myTasks,
+      isDirectMessageRecipient,
+      directMessageAssignedAt,
+    });
+  }, [doc, user?.user_id, myTasks, isDirectMessageRecipient, directMessageAssignedAt]);
 
   const { data: attachments } = useQuery({
     queryKey: QUERY_KEYS.documentAttachments(id!),
@@ -447,9 +482,7 @@ export default function DocumentDetailPage() {
   if (!documentIdValid) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/documents')}>
-          <ArrowLeft className="h-4 w-4" /> Documents
-        </Button>
+        <DocumentDetailToolbar onBack={() => navigate('/documents')} />
         <ErrorState
           title="Invalid document link"
           error={
@@ -465,9 +498,7 @@ export default function DocumentDetailPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/documents')}>
-          <ArrowLeft className="h-4 w-4" /> Documents
-        </Button>
+        <DocumentDetailToolbar onBack={() => navigate('/documents')} />
         <ErrorState error={error} onRetry={refetch} />
       </div>
     );
@@ -476,9 +507,7 @@ export default function DocumentDetailPage() {
   if (isLoading || !doc) {
     return (
       <div className="space-y-5">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
-          <ArrowLeft className="h-4 w-4" /> Documents
-        </Button>
+        <DocumentDetailToolbar onBack={() => navigate('/documents')} />
         <div className="space-y-3">
           <Skeleton className="h-7 w-72" />
           <Skeleton className="h-4 w-48" />
@@ -521,13 +550,9 @@ export default function DocumentDetailPage() {
 
   return (
     <div className="space-y-5">
-      <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
-        <ArrowLeft className="h-4 w-4" /> Documents
-      </Button>
-
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-start gap-3 min-w-0">
+        {/* <div className="flex items-start gap-3 min-w-0">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 mt-0.5">
             <FileText className="h-5 w-5 text-primary" />
           </div>
@@ -546,6 +571,7 @@ export default function DocumentDetailPage() {
                 status={doc.status}
                 pendingStageLabel={pendingStageLabel}
                 statusLabel={doc.status_label}
+                overdue={assignmentOverdue}
               />
               {doc.category && (
                 <Badge variant="secondary" className="text-xs font-normal">
@@ -586,16 +612,14 @@ export default function DocumentDetailPage() {
               )}
             </div>
           </div>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            loading={exportMutation.isPending}
-            onClick={openDocumentExport}
-          >
-            <FileDown className="h-4 w-4" /> Export document
-          </Button>
+        </div> */}
+        <DocumentDetailToolbar
+          onBack={() => navigate('/documents')}
+          onOpenProfile={() => setProfileOpen(true)}
+          onOpenWorkflow={() => setWorkflowOpen(true)}
+          showWorkflow={doc.delivery_mode === 'workflow'}
+        />
+        <div className="flex flex-col items-end gap-2 shrink-0">
           <DocumentActions
             document={doc}
             roles={user?.roles ?? []}
@@ -631,174 +655,69 @@ export default function DocumentDetailPage() {
 
             <CardContent className="px-0 pb-6 pt-0">
               <div className="divide-y divide-border">
-                {/* Mode & routing (mirrors the create page) */}
-                <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-mode">
-                  <h3
-                    id="section-mode"
-                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    Mode &amp; routing
-                  </h3>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ReadOnlyField label="Delivery" value={deliveryLabel} />
-                    <ReadOnlyField label="Document input" value={inputModeLabel} />
-                  </div>
-                  {doc.delivery_mode === 'workflow' && (
-                    <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2.5 text-sm">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                        Workflow
-                      </p>
-                      <p className="text-foreground">
-                        {wfTemplate?.name?.trim()
-                          ? wfTemplate.name
-                          : workflowTemplateLookupId
-                            ? 'Loading workflow template…'
-                            : 'No workflow template recorded.'}
-                      </p>
-                    </div>
-                  )}
-                  {doc.delivery_mode === 'direct_message' && (
-                    <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
-                      Direct message: tagged recipients can comment, request info or reject. The owner reviews and marks as
-                      reviewed — no workflow is started.
-                    </div>
-                  )}
-                </section>
-
-                {/* Document source — conditional on internal vs external + template vs manual */}
-                <section className="space-y-3 px-4 py-6 sm:px-6" aria-labelledby="section-source">
-                  <h3
-                    id="section-source"
-                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    Document source
-                  </h3>
-                  {isInternalMemo ? (
-                    doc.input_mode === 'template' ? (
-                      <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                          Document template
-                        </p>
-                        <p className="text-foreground">
-                          {docTemplate?.name?.trim()
-                            ? `${docTemplate.name}${docTemplate.status ? ` (${docTemplate.status})` : ''}`
-                            : templateId
-                              ? 'Loading template…'
-                              : 'No template selected.'}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
-                        Manual entry — no catalogue template was applied to the body.
-                      </div>
-                    )
-                  ) : (
-                    <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm space-y-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        External upload
-                      </p>
-                      <p className="text-foreground flex items-center gap-2 break-all">
-                        <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        {doc.original_filename || doc.intake_file_name || '—'}
-                      </p>
-                      {doc.intake_file_name && doc.intake_file_name !== doc.original_filename && (
-                        <p className="text-xs text-muted-foreground">
-                          Display name: <span className="font-medium text-foreground">{doc.intake_file_name}</span>
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </section>
-
-                {/* Document profile (read-only mirror of the create-page section) */}
-                <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-profile">
-                  <h3
-                    id="section-profile"
-                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    Document profile
-                  </h3>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ReadOnlyField label="Subject" value={doc.title?.trim() || '—'} />
-                    <ReadOnlyField label="Reference number" value={doc.ref_number || '—'} mono />
-                    <ReadOnlyField label="Document date" value={documentDateValue} />
-                    <ReadOnlyField label="Received" value={receivedDateValue} />
-                    <ReadOnlyField label="Category" value={categoryLabel} />
-                    <ReadOnlyField label="Urgency" value={urgencyLabel} />
-                    <ReadOnlyField label="Classification" value={classificationLabel} />
-                    <ReadOnlyField label="Department" value={departmentName} />
-                    <ReadOnlyField label="Owner" value={ownerName} className="capitalize" />
-                  </div>
-                </section>
-
                 {/* Sender & recipients */}
-                <section className="space-y-3 px-4 py-6 sm:px-6" aria-labelledby="section-recipients">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <section className="px-4 py-5 sm:px-6" aria-labelledby="section-recipients">
+                  <div className="mb-3 flex items-center justify-between gap-3">
                     <h3
                       id="section-recipients"
-                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
+                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                     >
-                      <Users className="h-3.5 w-3.5" /> Sender &amp; recipients
+                      Sender &amp; recipients
                     </h3>
                     {canAddRecipient && (
-                      <Button variant="outline" size="sm" onClick={() => setRecipientOpen(true)}>
+                      <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setRecipientOpen(true)}>
                         Add recipient
                       </Button>
                     )}
                   </div>
-                  <div className="rounded-md border border-border/60 bg-background px-3 py-2.5 text-sm">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Sender
-                      </span>
-                      <span className="font-medium capitalize">{ownerName}</span>
+                  <dl className="space-y-2.5 text-sm">
+                    <div className="flex gap-4">
+                      <dt className="w-12 shrink-0 text-muted-foreground">From</dt>
+                      <dd className="min-w-0 text-foreground">
+                        <span className="font-medium capitalize">{ownerName}</span>
+                        {ownerContext ? (
+                          <span className="text-muted-foreground"> · {ownerContext}</span>
+                        ) : null}
+                      </dd>
                     </div>
-                    {ownerContext && (
-                      <p className="mt-1 text-xs text-muted-foreground">{ownerContext}</p>
-                    )}
-                  </div>
-                  {!recipients?.length ? (
-                    <p className="text-sm text-muted-foreground italic">
-                      {doc.delivery_mode === 'direct_message'
-                        ? 'Direct message: no recipients tagged yet.'
-                        : 'No recipients tagged.'}
-                    </p>
-                  ) : (
-                    <ul className="grid gap-2 sm:grid-cols-2">
-                      {recipients.map((r) => {
-                        const typeKey = (r.recipient_type ?? 'to').toLowerCase();
-                        const tone = RECIPIENT_TYPE_TONE[typeKey] ?? 'bg-muted text-muted-foreground';
-                        const recipientProfile = userById.get(r.user_id);
-                        const recipientName = userDisplayName(
-                          recipientProfile,
-                          resolveUsername(r.user_id)
-                        );
-                        const recipientContext = userRoleContext(recipientProfile, roles);
-                        return (
-                          <li
-                            key={r.id}
-                            className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm"
-                          >
-                            <span className="min-w-0">
-                              <span className="block font-medium capitalize truncate">
-                                {recipientName}
-                              </span>
-                              {recipientContext && (
-                                <span className="block text-xs text-muted-foreground truncate">
-                                  {recipientContext}
+                    {(['to', 'cc', 'bcc'] as const).map((type) => {
+                      const group = (recipients ?? []).filter(
+                        (r) => (r.recipient_type ?? 'to').toLowerCase() === type
+                      );
+                      if (!group.length) return null;
+                      return (
+                        <div key={type} className="flex gap-4">
+                          <dt className="w-12 shrink-0 text-muted-foreground uppercase">{type}</dt>
+                          <dd className="min-w-0 text-foreground leading-relaxed">
+                            {group.map((r, idx) => {
+                              const profile = userById.get(r.user_id);
+                              const name = userDisplayName(profile, resolveUsername(r.user_id));
+                              const context = userRoleContext(profile, roles);
+                              return (
+                                <span key={r.id}>
+                                  {idx > 0 ? ', ' : null}
+                                  <span className="capitalize">{name}</span>
+                                  {context ? (
+                                    <span className="text-muted-foreground"> ({context})</span>
+                                  ) : null}
                                 </span>
-                              )}
-                            </span>
-                            <span
-                              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${tone}`}
-                            >
-                              {r.recipient_type}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                              );
+                            })}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                    {!recipients?.length && (
+                      <div className="flex gap-4">
+                        <dt className="w-12 shrink-0 text-muted-foreground">To</dt>
+                        <dd className="text-muted-foreground italic">
+                          {doc.delivery_mode === 'direct_message'
+                            ? 'No recipients tagged yet'
+                            : 'None'}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
                 </section>
 
                 {/* Body */}
@@ -928,91 +847,6 @@ export default function DocumentDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Secondary inspectors — audit + BPMN — kept as tabs to avoid stretching the page. */}
-          <Tabs defaultValue="audit">
-            <TabsList>
-              <TabsTrigger value="audit">
-                <Shield className="h-3.5 w-3.5" /> Audit {auditLogs ? `(${auditLogs.length})` : ''}
-              </TabsTrigger>
-              <TabsTrigger value="workflow">
-                <GitBranch className="h-3.5 w-3.5" /> Workflow
-              </TabsTrigger>
-              <TabsTrigger value="versions">
-                <Hash className="h-3.5 w-3.5" /> Versions {versions ? `(${versions.length})` : ''}
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="audit">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Shield className="h-4 w-4" /> Audit Trail
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {auditIsError ? (
-                    <ErrorState
-                      error={auditError}
-                      title="Could not load audit trail"
-                      onRetry={() => void refetchAudit()}
-                    />
-                  ) : (
-                    <AuditTimeline logs={auditLogs ?? []} loading={auditLoading} />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="workflow">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" /> BPMN routing &amp; approvals
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    Read-only view of the workflow engine path (linear orchestration). Approvals and transitions
-                    continue to run through existing APIs.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <WorkflowBpmnPanel documentId={doc.id} documentStatus={doc.status} />
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="versions">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Hash className="h-4 w-4" /> Version History
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {versionsLoading ? (
-                    <Skeleton className="h-20 w-full" />
-                  ) : !versions?.length ? (
-                    <p className="text-sm text-muted-foreground">No versions.</p>
-                  ) : (
-                    <ul className="space-y-2 text-sm">
-                      {[...versions]
-                        .sort((a, b) => b.version_number - a.version_number)
-                        .map((v) => (
-                          <li
-                            key={v.id}
-                            className="flex justify-between gap-2 border border-border/60 rounded-lg px-3 py-2"
-                          >
-                            <span className="font-medium">v{v.version_number}</span>
-                            <span className="text-xs text-muted-foreground tabular-nums">
-                              {formatDateTime(v.created_at)}
-                            </span>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
         </div>
 
         <aside className="min-w-0 xl:sticky xl:top-4 space-y-4">
@@ -1020,6 +854,7 @@ export default function DocumentDetailPage() {
             documentStatus={doc.status}
             statusLabel={doc.status_label}
             pendingStageLabel={pendingStageLabel}
+            assignmentOverdue={assignmentOverdue}
             refNumber={doc.ref_number}
             documentTitle={doc.title?.trim() || 'Untitled document'}
             ownerDisplayName={ownerName}
@@ -1094,6 +929,74 @@ export default function DocumentDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" /> Document profile
+            </DialogTitle>
+            <DialogDescription>
+              Metadata and routing details for this document.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2 py-2">
+            <ReadOnlyField label="Subject" value={doc.title?.trim() || '—'} />
+            <ReadOnlyField label="Reference number" value={doc.ref_number || '—'} mono />
+            <ReadOnlyField label="Document date" value={documentDateValue} />
+            <ReadOnlyField label="Received" value={receivedDateValue} />
+            <ReadOnlyField label="Category" value={categoryLabel} />
+            <ReadOnlyField label="Urgency" value={urgencyLabel} />
+            <ReadOnlyField label="Classification" value={classificationLabel} />
+            <ReadOnlyField label="Department" value={departmentName} />
+            <ReadOnlyField label="Delivery" value={deliveryLabel} />
+            <ReadOnlyField label="Document input" value={inputModeLabel} />
+            <ReadOnlyField label="Owner" value={ownerName} className="capitalize" />
+            {doc.delivery_mode === 'workflow' && (
+              <div className="sm:col-span-2">
+                <ReadOnlyField
+                  label="Workflow template"
+                  value={
+                    wfTemplate?.name?.trim()
+                      ? wfTemplate.name
+                      : workflowTemplateLookupId
+                        ? 'Loading…'
+                        : '—'
+                  }
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {doc.delivery_mode === 'workflow' && (
+        <Dialog open={workflowOpen} onOpenChange={setWorkflowOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+            <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+              <DialogTitle className="flex items-center gap-2">
+                <GitBranch className="h-5 w-5" /> Workflow routing &amp; approvals
+              </DialogTitle>
+              <DialogDescription>
+                Read-only view of the workflow path. Approvals and transitions continue through the action controls on this page.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="px-6 pb-6 overflow-y-auto min-h-0">
+              <WorkflowBpmnPanel documentId={doc.id} documentStatus={doc.status} />
+            </div>
+            <DialogFooter className="px-6 py-4 border-t border-border shrink-0">
+              <Button variant="outline" onClick={() => setWorkflowOpen(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/**
        * Floating discussions widget — anchored to the viewport so users can pop

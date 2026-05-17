@@ -27,7 +27,7 @@ import { workflowApi } from '@/api/workflow';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
 import { getPendingDocumentWorkflowStageLabel } from '@/utils/workflowStageLabel';
-import { formatDateTime, formatRelative, isOverdue } from '@/utils/formatters';
+import { formatDateTime, formatRelative, isTaskOverdue } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { cn } from '@/utils/cn';
 import { documentTypeHeadline, shouldShowTemplateTitleAsSubtitle } from '@/utils/documentDisplay';
@@ -119,7 +119,7 @@ export default function TaskDetailPage() {
   }
 
   const overdue = task
-    ? isOverdue(task.due_date) && task.status !== 'completed' && task.status !== 'cancelled'
+    ? isTaskOverdue(task)
     : false;
   const taskOpen = task?.status === 'pending' || task?.status === 'in_progress';
   const isTerminal = task && (task.status === 'completed' || task.status === 'cancelled');

@@ -12,7 +12,10 @@ export function AppShell() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const user = useAuthStore((s) => s.user);
-  const mainContentFullWidth = location.pathname === '/documents/new';
+  const mainContentFullWidth =
+    location.pathname === '/documents' ||
+    location.pathname === '/documents/new' ||
+    /^\/documents\/[0-9a-f-]{36}$/i.test(location.pathname);
   const setNotifications = useNotificationStore((s) => s.setNotifications);
 
   useEffect(() => {

@@ -75,9 +75,9 @@ export function NhiaMemoLetterhead({
         <img
           src={NHIA_LOGO_SRC}
           alt="NHIA"
-          className="h-24 w-24 sm:h-28 sm:w-28 object-contain shrink-0"
+          className="h-20 w-30  object-contain shrink-0"
         />
-        <div className="text-left min-w-0">
+        {/* <div className="text-left min-w-0">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
             Federal Republic of Nigeria
           </p>
@@ -90,7 +90,7 @@ export function NhiaMemoLetterhead({
             </p>
           ) : null}
           {!locationParts ? <p className="text-xs text-gray-600">{FALLBACK_HQ_ADDRESS}</p> : null}
-        </div>
+        </div> */}
       </div>
       {locationParts?.stateLine ? (
         <p className="text-center text-xs text-gray-600 mt-1">{locationParts.stateLine}</p>
