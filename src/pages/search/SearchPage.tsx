@@ -1,10 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type FormEvent } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  Search, Upload, FileText, Scan, X,
+  Search as SearchIcon, Upload, FileText, Scan, X,
   ExternalLink, AlertCircle, CheckCircle2, Copy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -53,7 +53,7 @@ export default function SearchPage() {
     maxFiles: 1,
   });
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = (e: FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
     searchMutation.mutate();
@@ -68,7 +68,7 @@ export default function SearchPage() {
 
       <Tabs defaultValue="search">
         <TabsList>
-          <TabsTrigger value="search"><Search className="h-3.5 w-3.5" /> Full-Text Search</TabsTrigger>
+          <TabsTrigger value="search"><SearchIcon className="h-3.5 w-3.5" /> Full-Text Search</TabsTrigger>
           <TabsTrigger value="ocr"><Scan className="h-3.5 w-3.5" /> OCR Extraction</TabsTrigger>
         </TabsList>
 
@@ -76,7 +76,7 @@ export default function SearchPage() {
         <TabsContent value="search" className="space-y-4">
           <form onSubmit={handleSearch} className="flex gap-2">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 placeholder="Search documents by title or content…"
                 value={query}
@@ -103,7 +103,7 @@ export default function SearchPage() {
               {searchResults.hits.length === 0 ? (
                 <div className="flex flex-col items-center py-12 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mb-3">
-                    <Search className="h-6 w-6 text-muted-foreground" strokeWidth={1.5} />
+                    <SearchIcon className="h-6 w-6 text-muted-foreground" strokeWidth={1.5} />
                   </div>
                   <p className="text-sm font-medium text-foreground">No documents found</p>
                   <p className="text-xs text-muted-foreground mt-1">Try different search terms or check if documents are indexed</p>

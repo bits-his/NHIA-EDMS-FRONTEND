@@ -19,7 +19,7 @@ const WorkflowsPage = lazy(() => import('@/pages/workflows/WorkflowsPage'));
 const WorkflowTemplateDesignPage = lazy(() => import('@/pages/workflows/WorkflowTemplateDesignPage'));
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'));
 const NotificationsPage = lazy(() => import('@/pages/notifications/NotificationsPage'));
-const SearchPage = lazy(() => import('@/pages/search/SearchPage'));
+import SearchPage from '@/pages/search/SearchPage';
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
 const TemplateListPage = lazy(() => import('@/pages/template-management/TemplateListPage'));

@@ -5,9 +5,27 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    dedupe: ['react', 'react-dom', 'react-is'],
     alias: {
       '@': path.resolve(__dirname, './src'),
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+      'react-is': path.resolve(__dirname, 'node_modules/react-is'),
     },
+  },
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react-is',
+      'react/jsx-runtime',
+      'react/jsx-dev-runtime',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-direction',
+      'react-dropzone',
+      'recharts',
+    ],
   },
   server: {
     port: 5173,
@@ -20,7 +38,7 @@ export default defineConfig({
       },
       // Document agent
       '/proxy/document': {
-        target: 'http://localhost:3002',
+        target: 'http://localhost:3012',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/proxy\/document/, ''),
       },

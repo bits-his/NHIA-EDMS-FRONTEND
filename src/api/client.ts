@@ -20,7 +20,7 @@ function normalizeDocumentAgentBaseUrl(url: string): string {
 const URLS = {
   orchestrator: import.meta.env.VITE_ORCHESTRATOR_URL ?? 'http://localhost:3000',
   auth: import.meta.env.VITE_AUTH_URL ?? 'http://localhost:3001',
-  document: normalizeDocumentAgentBaseUrl(import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:3002'),
+  document: normalizeDocumentAgentBaseUrl(import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:3012'),
   workflow: import.meta.env.VITE_WORKFLOW_URL ?? 'http://localhost:3003',
   task: import.meta.env.VITE_TASK_URL ?? 'http://localhost:3004',
   audit: import.meta.env.VITE_AUDIT_URL ?? 'http://localhost:3005',
