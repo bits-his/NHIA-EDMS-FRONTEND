@@ -32,6 +32,7 @@ import {
 } from '@/utils/recipientPicker';
 
 const documentTypeSchema = z.enum(['internal', 'external']);
+const correspondenceDirectionSchema = z.enum(['incoming', 'outgoing']);
 const fileCategorySchema = z.enum(['secret', 'top_secret', 'important', 'normal']);
 const prioritySchema = z.enum(['normal', 'important', 'urgent', 'critical']);
 const actionSchema = z.enum(['send', 'draft']);
@@ -52,6 +53,7 @@ const formSchema = z
     document_priority: prioritySchema,
     file_name: z.string().min(1, 'File name is required').max(500),
     ref_code: z.string().max(120).optional(),
+    correspondence_direction: correspondenceDirectionSchema.optional(),
     action: actionSchema,
     /** Filter users by profile rank (NHIA grade / title); required before recipient when sending direct message. */
     direct_recipient_rank: z.string().optional(),
@@ -75,6 +77,13 @@ const formSchema = z
           path: ['document_template_id'],
         });
       }
+    }
+    if (data.document_type === 'external' && !data.correspondence_direction) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select incoming or outgoing correspondence',
+        path: ['correspondence_direction'],
+      });
     }
     if (data.delivery_mode === 'direct_message' && data.action === 'send') {
       if (!data.direct_recipient_rank?.trim()) {
@@ -190,6 +199,7 @@ export default function CreateDocumentPage() {
       document_priority: 'normal',
       file_name: '',
       ref_code: '',
+      correspondence_direction: 'incoming',
       action: 'send',
       direct_recipient_rank: '',
       direct_recipient_user_id: '',
@@ -401,6 +411,7 @@ export default function CreateDocumentPage() {
       const title = data.subject.trim() || data.file_name.trim();
       const created = await documentsApi.uploadExternal(uploadFile, title, department, {
         ref_number: ref,
+        correspondence_direction: data.correspondence_direction!,
         urgency,
         ...creationProfile,
       });
@@ -742,10 +753,38 @@ export default function CreateDocumentPage() {
                   </>
                 ) : (
                   <>
-                    <Label className="text-muted-foreground">Document template</Label>
-                    <div className="flex min-h-[36px] w-full items-center rounded-md border border-dashed border-muted-foreground/25 bg-muted/30 px-3 text-sm text-muted-foreground">
-                      External documents only
-                    </div>
+                    <Label>
+                      Correspondence <span className="text-destructive">*</span>
+                    </Label>
+                    <Select
+                      value={form.watch('correspondence_direction') ?? 'incoming'}
+                      onValueChange={(v) =>
+                        form.setValue('correspondence_direction', v as 'incoming' | 'outgoing', {
+                          shouldValidate: true,
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          'w-full',
+                          form.formState.errors.correspondence_direction ? 'border-destructive' : undefined
+                        )}
+                      >
+                        <SelectValue placeholder="Incoming or outgoing" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="incoming">Incoming</SelectItem>
+                        <SelectItem value="outgoing">Outgoing</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {form.formState.errors.correspondence_direction && (
+                      <p className="text-xs text-destructive">
+                        {form.formState.errors.correspondence_direction.message}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Registry tracking ID (NHIA/IN/… or NHIA/OUT/…) is assigned automatically.
+                    </p>
                   </>
                 )}
               </div>

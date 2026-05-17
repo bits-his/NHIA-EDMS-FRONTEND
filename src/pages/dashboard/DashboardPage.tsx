@@ -5,7 +5,7 @@ import {
   FileText, Layers, CheckSquare, Shield, Plus, Search,
   ArrowRight, Bell,   TrendingUp, Clock, AlertTriangle, Activity, Users,
   CheckCircle, XCircle, LayoutDashboard, User, Radar,
-  Globe2, BarChart3, MapPin,
+  BarChart3,
 } from 'lucide-react';
 import {
   Bar,
@@ -82,9 +82,9 @@ function DirectorDashboardShell() {
         className={cn(
           'rounded-2xl border px-4 py-3 sm:py-3.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4',
           'border-emerald-200/50 dark:border-emerald-900/40',
-          'bg-gradient-to-br from-emerald-50/80 via-background to-violet-50/80',
-          'dark:from-emerald-950/35 dark:via-background dark:to-violet-950/35',
-          'shadow-sm shadow-emerald-500/5 dark:shadow-violet-500/10'
+          'bg-gradient-to-br from-emerald-50/80 via-background to-emerald-50/50',
+          'dark:from-emerald-950/35 dark:via-background dark:to-emerald-950/25',
+          'shadow-sm shadow-emerald-500/5 dark:shadow-emerald-500/10'
         )}
       >
         <div className="flex items-start gap-2.5 min-w-0">
@@ -93,7 +93,7 @@ function DirectorDashboardShell() {
               'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-md transition-all duration-300',
               view === 'personal'
                 ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/30'
-                : 'bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-600 shadow-violet-500/30'
+                : 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/30'
             )}
           >
             <LayoutDashboard className="h-4 w-4" />
@@ -104,7 +104,7 @@ function DirectorDashboardShell() {
               <span className="font-medium text-emerald-700 dark:text-emerald-400">My dashboard</span>
               {' — '}your tasks and documents you own.
               {' '}
-              <span className="font-medium text-violet-700 dark:text-violet-400">360 · Operations</span>
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">360 · Operations</span>
               {' — '}organisation-wide oversight (Director / GM grades and legacy director role).
             </p>
           </div>
@@ -142,24 +142,24 @@ function DirectorDashboardShell() {
             onClick={() => setView('360')}
             className={cn(
               'flex flex-1 sm:flex-none min-h-[2.75rem] sm:min-h-0 items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               view === '360'
                 ? cn(
-                    'text-white shadow-lg shadow-violet-500/35',
-                    'bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-600',
-                    'ring-2 ring-violet-400/50 ring-offset-2 ring-offset-background scale-[1.02]'
+                    'text-white shadow-lg shadow-emerald-500/30',
+                    'bg-gradient-to-br from-emerald-500 to-teal-600',
+                    'ring-2 ring-emerald-400/50 ring-offset-2 ring-offset-background scale-[1.02]'
                   )
                 : cn(
-                    'text-violet-800 dark:text-violet-300',
-                    'bg-violet-100/70 dark:bg-violet-950/50 border border-violet-200/80 dark:border-violet-800/60',
-                    'hover:bg-violet-200/80 dark:hover:bg-violet-900/45 hover:border-violet-300 dark:hover:border-violet-700'
+                    'text-emerald-800 dark:text-emerald-300',
+                    'bg-emerald-100/70 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60',
+                    'hover:bg-emerald-200/80 dark:hover:bg-emerald-900/45 hover:border-emerald-300 dark:hover:border-emerald-700'
                   )
             )}
           >
             <Radar
               className={cn(
                 'h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0',
-                view === '360' ? 'text-white' : 'text-violet-600 dark:text-violet-400'
+                view === '360' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'
               )}
             />
             360 · Operations
@@ -657,23 +657,6 @@ function Operational360Dashboard() {
 // ─── Executive 360 (Director / Director General) ─────────────────────────────
 type ExecutiveVariant = 'director' | 'dgo';
 
-const EXEC_VARIANT = {
-  director: {
-    title: 'Director · Operational Command',
-    subtitle:
-      'Departmental workflow oversight, approval pipelines, and operational KPIs within your NHIA scope.',
-    Icon: Layers,
-    banner: 'from-emerald-600/90 to-teal-700/90',
-  },
-  dgo: {
-    title: 'Director General · Strategic 360',
-    subtitle:
-      'National operational intelligence — zonal performance, state offices, workflow health, and executive decision support.',
-    Icon: Globe2,
-    banner: 'from-indigo-600/90 via-violet-600/90 to-fuchsia-700/90',
-  },
-} as const;
-
 function HealthMetricRow({
   label,
   value,
@@ -767,8 +750,6 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const meta = EXEC_VARIANT[variant];
-  const HeaderIcon = meta.Icon;
   const isAdmin = user?.roles.includes('admin') ?? false;
   const canRecentAudit = isAdmin || hasPermission('view_audit_logs');
   const showAuditLogPage = canAccessAuditLogModule(user?.roles);
@@ -825,33 +806,6 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
 
   return (
     <div className="space-y-6">
-      <div
-        className={cn(
-          'rounded-2xl border border-white/10 px-5 py-4 text-white shadow-lg',
-          'bg-gradient-to-r',
-          meta.banner
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15">
-            <HeaderIcon className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-lg font-bold tracking-tight">{meta.title}</p>
-            <p className="text-sm text-white/85 mt-0.5">{meta.subtitle}</p>
-            {data?.scope?.label && (
-              <p className="text-xs text-white/70 mt-2 flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                Scope: {data.scope.label}
-                {data.generatedAt && (
-                  <span className="ml-2 opacity-80">· Updated {formatRelative(data.generatedAt)}</span>
-                )}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
       <PageHeader
         title="360 · Executive intelligence"
         description="Live metrics from documents, workflows, tasks, and audit activity — scoped to your authority."
@@ -962,9 +916,9 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
               label="Escalation signals"
               value={data?.workflowHealth.escalationSignals ?? 0}
               sub={`${kpis?.workflows.stalled ?? 0} stalled workflows`}
-              color="text-violet-600 dark:text-violet-400"
-              bg="bg-violet-50 dark:bg-violet-900/20"
-              ring="ring-violet-100 dark:ring-violet-900/30"
+              color="text-primary"
+              bg="bg-primary/10"
+              ring="ring-primary/20"
               onClick={() => navigate(executiveDrill.escalation())}
             />
           </>
@@ -1185,10 +1139,19 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" /> Staff workload
             </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-8 shrink-0"
+              onClick={() => navigate('/performance')}
+            >
+              Performance leaderboard
+              <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
           </CardHeader>
           <CardContent className="space-y-2">
             {(data?.assigneeWorkload ?? []).length === 0 ? (
@@ -1530,9 +1493,9 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
         value: activityFeed.length,
         sub: 'audit + docs + tasks',
         icon: Shield,
-        color: 'text-violet-600 dark:text-violet-400',
-        bg: 'bg-violet-50 dark:bg-violet-900/20',
-        ring: 'ring-violet-100 dark:ring-violet-900/30',
+        color: 'text-primary',
+        bg: 'bg-primary/10',
+        ring: 'ring-primary/20',
         onClick: showAuditLogPage ? () => navigate('/audit') : undefined,
       },
       { label: 'Unread Notifications',  value: unreadCount,              sub: 'awaiting review',   icon: Bell,        color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-50 dark:bg-amber-900/20',  ring: 'ring-amber-100 dark:ring-amber-900/30',  onClick: () => navigate('/notifications') },

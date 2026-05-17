@@ -357,8 +357,7 @@ export function DocumentActions({
     showApproveAndForward ||
     showReviewForward ||
     actions.canRequestInfo ||
-    (!suppressWorkflowStepActions && actions.canEditForward) ||
-    actions.canApproveDirectMessage;
+    (!suppressWorkflowStepActions && actions.canEditForward);
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
 
@@ -424,22 +423,6 @@ export function DocumentActions({
           <Button variant="default" size="sm" onClick={() => openCommentDialog('finalApprove')}>
             <ShieldCheck className="h-4 w-4" />
             Final approve
-          </Button>
-        )}
-        {actions.canApproveDirectMessage && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() =>
-              mutation.mutate({
-                fn: () => documentsApi.approve(document.id),
-                message: 'Document marked reviewed (approved)',
-              })
-            }
-            loading={mutation.isPending}
-          >
-            <CheckCircle className="h-4 w-4" />
-            Mark reviewed
           </Button>
         )}
         {actions.canArchive && (

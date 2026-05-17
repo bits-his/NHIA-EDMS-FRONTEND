@@ -62,6 +62,7 @@ import {
 import { getDocumentActions } from '@/utils/permissions';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { documentTypeHeadline, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
+import { correspondenceDirectionLabel } from '@/utils/correspondence';
 import { buildDocumentExportHtml, inlineExportImagesInHtml } from '@/utils/documentExport';
 import { roleDisplayLabel } from '@/utils/recipientPicker';
 import type { RecipientType } from '@/types/document';
@@ -539,6 +540,7 @@ export default function DocumentDetailPage() {
   const receivedDateValue = doc.receive_recorded_at
     ? formatDateTime(doc.receive_recorded_at)
     : formatDateTime(doc.created_at);
+  const correspondenceLabel = correspondenceDirectionLabel(doc.correspondence_direction);
 
   /** "<p></p>" / "<p><br></p>" / "&nbsp;" should not look like real body text. */
   const bodyHtml = doc.content ?? '';
@@ -552,7 +554,7 @@ export default function DocumentDetailPage() {
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        {/* <div className="flex items-start gap-3 min-w-0">
+        <div className="flex items-start gap-3 min-w-0">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 mt-0.5">
             <FileText className="h-5 w-5 text-primary" />
           </div>
@@ -577,6 +579,16 @@ export default function DocumentDetailPage() {
                 <Badge variant="secondary" className="text-xs font-normal">
                   <Tag className="h-3 w-3 mr-1" />
                   {categoryLabel}
+                </Badge>
+              )}
+              {doc.tracking_id?.trim() && (
+                <Badge variant="outline" className="text-xs font-mono font-normal">
+                  Tracking: {doc.tracking_id.trim()}
+                </Badge>
+              )}
+              {doc.correspondence_direction && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  {correspondenceLabel}
                 </Badge>
               )}
               {doc.ref_number && (
@@ -612,7 +624,7 @@ export default function DocumentDetailPage() {
               )}
             </div>
           </div>
-        </div> */}
+        </div>
         <DocumentDetailToolbar
           onBack={() => navigate('/documents')}
           onOpenProfile={() => setProfileOpen(true)}
@@ -856,6 +868,9 @@ export default function DocumentDetailPage() {
             pendingStageLabel={pendingStageLabel}
             assignmentOverdue={assignmentOverdue}
             refNumber={doc.ref_number}
+            trackingId={doc.tracking_id}
+            correspondenceDirection={doc.correspondence_direction}
+            archivedAt={doc.archived_at}
             documentTitle={doc.title?.trim() || 'Untitled document'}
             ownerDisplayName={ownerName}
             ownerRoleContext={ownerContext}
@@ -942,7 +957,20 @@ export default function DocumentDetailPage() {
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2 py-2">
             <ReadOnlyField label="Subject" value={doc.title?.trim() || '—'} />
+            <ReadOnlyField label="Tracking ID" value={doc.tracking_id || '—'} mono />
             <ReadOnlyField label="Reference number" value={doc.ref_number || '—'} mono />
+            <ReadOnlyField
+              label="Correspondence"
+              value={
+                doc.correspondence_direction
+                  ? correspondenceDirectionLabel(doc.correspondence_direction)
+                  : '—'
+              }
+            />
+            <ReadOnlyField
+              label="Archive status"
+              value={doc.archived_at ? formatDateTime(doc.archived_at) : doc.status === 'archived' ? 'Archived' : '—'}
+            />
             <ReadOnlyField label="Document date" value={documentDateValue} />
             <ReadOnlyField label="Received" value={receivedDateValue} />
             <ReadOnlyField label="Category" value={categoryLabel} />

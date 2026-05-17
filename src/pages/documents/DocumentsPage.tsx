@@ -51,7 +51,8 @@ import { authApi } from '@/api/auth';
 import { getErrorMessage } from '@/api/client';
 import { canCreateDocument } from '@/utils/permissions';
 import { QUERY_KEYS } from '@/utils/constants';
-import type { Document, DocumentCategory, DocumentStatus } from '@/types/document';
+import type { CorrespondenceDirection, Document, DocumentCategory, DocumentStatus } from '@/types/document';
+import { correspondenceDirectionLabel, documentRegistryId } from '@/utils/correspondence';
 import { formatRelative, isDocumentAssignmentOverdue } from '@/utils/formatters';
 import { registerUsers, resolveUsername } from '@/utils/users';
 import { documentTypeHeadline, shouldShowTemplateTitleAsSubtitle } from '@/utils/documentDisplay';
@@ -64,7 +65,7 @@ import { cn } from '@/utils/cn';
  * that needs their attention. Leadership oversight roles see broader sets, which
  * is acceptable since their "Action required" view is intentionally inclusive.
  */
-type DocumentBucket = 'all' | 'drafts' | 'action' | 'completed';
+type DocumentBucket = 'all' | 'drafts' | 'action' | 'completed' | 'archive';
 
 const FINISHED_STATUSES: ReadonlySet<DocumentStatus> = new Set([
   'approved',
@@ -75,6 +76,7 @@ const FINISHED_STATUSES: ReadonlySet<DocumentStatus> = new Set([
 function bucketForStatus(status: DocumentStatus): Exclude<DocumentBucket, 'all'> {
   if (status === 'draft') return 'drafts';
   if (status === 'pending') return 'action';
+  if (status === 'archived') return 'archive';
   return 'completed';
 }
 
@@ -142,6 +144,7 @@ export default function DocumentsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<DocumentCategory | 'all'>('all');
+  const [directionFilter, setDirectionFilter] = useState<CorrespondenceDirection | 'all'>('all');
   const [bucket, setBucket] = useState<DocumentBucket>('all');
   const [recallDoc, setRecallDoc] = useState<Document | null>(null);
   const [reassignDoc, setReassignDoc] = useState<Document | null>(null);
@@ -155,6 +158,8 @@ export default function DocumentsPage() {
   const useServerSearch = Boolean(
     search.trim() ||
       categoryFilter !== 'all' ||
+      directionFilter !== 'all' ||
+      bucket === 'archive' ||
       dateFrom.trim() ||
       dateTo.trim()
   );
@@ -162,6 +167,8 @@ export default function DocumentsPage() {
   const searchFilters = {
     ...(search.trim() ? { keyword: search.trim() } : {}),
     ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}),
+    ...(directionFilter !== 'all' ? { correspondence_direction: directionFilter } : {}),
+    ...(bucket === 'archive' ? { status: 'archived' as const } : {}),
     ...(dateFrom.trim() ? { date_from: `${dateFrom.trim()}T00:00:00.000Z` } : {}),
     ...(dateTo.trim() ? { date_to: `${dateTo.trim()}T23:59:59.999Z` } : {}),
   };
@@ -232,14 +239,16 @@ export default function DocumentsPage() {
       acc[bucketForStatus(d.status)] += 1;
       return acc;
     },
-    { all: 0, drafts: 0, action: 0, completed: 0 }
+    { all: 0, drafts: 0, action: 0, completed: 0, archive: 0 }
   );
 
   const filtered = docs.filter((doc) => {
     if (bucket === 'all') return true;
+    if (bucket === 'archive') return doc.status === 'archived';
     if (bucket === 'drafts') return doc.status === 'draft';
     if (bucket === 'action') return doc.status === 'pending';
-    return FINISHED_STATUSES.has(doc.status);
+    if (bucket === 'completed') return doc.status === 'approved' || doc.status === 'rejected';
+    return false;
   });
 
   const sortedByRecency = useMemo(
@@ -391,6 +400,7 @@ export default function DocumentsPage() {
                   <SelectItem value="drafts">Drafts ({bucketCounts.drafts})</SelectItem>
                   <SelectItem value="action">Action required ({bucketCounts.action})</SelectItem>
                   <SelectItem value="completed">Completed ({bucketCounts.completed})</SelectItem>
+                  <SelectItem value="archive">Archive ({bucketCounts.archive})</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -435,6 +445,24 @@ export default function DocumentsPage() {
                   <SelectItem value="all">All categories</SelectItem>
                   <SelectItem value="internal_memo">Internal memo</SelectItem>
                   <SelectItem value="external_correspondence">External correspondence</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="sm:col-span-2 lg:col-span-2">
+              <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Correspondence
+              </label>
+              <Select
+                value={directionFilter}
+                onValueChange={(v) => setDirectionFilter(v as CorrespondenceDirection | 'all')}
+              >
+                <SelectTrigger className="h-10 bg-background">
+                  <SelectValue placeholder="Direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All directions</SelectItem>
+                  <SelectItem value="incoming">Incoming</SelectItem>
+                  <SelectItem value="outgoing">Outgoing</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -668,7 +696,7 @@ export default function DocumentsPage() {
                                   </Badge>
                                 ) : doc.category === 'external_correspondence' ? (
                                   <Badge variant="outline" className="font-normal text-xs">
-                                    External
+                                    {correspondenceDirectionLabel(doc.correspondence_direction)}
                                   </Badge>
                                 ) : (
                                   <span className="text-xs text-muted-foreground">—</span>
@@ -683,9 +711,9 @@ export default function DocumentsPage() {
                                 />
                               </td>
                               <td className="px-4 py-3.5 align-top">
-                                {doc.ref_number ? (
+                                {documentRegistryId(doc) ? (
                                   <span className="inline-block rounded-md border border-border/60 bg-muted/30 px-2 py-0.5 font-mono text-[11px] text-foreground">
-                                    {doc.ref_number}
+                                    {documentRegistryId(doc)}
                                   </span>
                                 ) : (
                                   <span className="text-xs text-muted-foreground">—</span>

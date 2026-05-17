@@ -12,22 +12,29 @@ import {
   ChevronRight,
   Users,
   Layers,
+  Trophy,
 } from 'lucide-react';
 import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 import { cn } from '@/utils/cn';
-import { canAccessTemplateManagement, canAccessAuditLogModule, canCreateDocument } from '@/utils/permissions';
+import {
+  canAccessTemplateManagement,
+  canAccessAuditLogModule,
+  canAccessPerformanceTracking,
+  canManageUsers,
+  isJuniorStaffOnly,
+} from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { formatAuthRolesForDisplay } from '@/utils/workflowEditor';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/documents', icon: FileText, label: 'Documents' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', juniorVisible: true },
+  { to: '/documents', icon: FileText, label: 'Documents', juniorVisible: true },
   { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/audit', icon: Shield, label: 'Audit Log', requiresAuditAccess: true },
-  { to: '/notifications', icon: Bell, label: 'Notifications', badge: true },
+  { to: '/notifications', icon: Bell, label: 'Notifications', badge: true, juniorVisible: true },
   { to: '/search', icon: Search, label: 'Search & OCR' },
 ] as const;
 
@@ -44,11 +51,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const showUserDirectory = user?.roles
-    ? canCreateDocument(user.roles, user.permissions ?? [])
-    : false;
+  const roles = user?.roles ?? [];
+  const juniorOnly = isJuniorStaffOnly(roles);
+  const showUserManagement = canManageUsers(roles);
   const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
   const showAuditNav = canAccessAuditLogModule(user?.roles);
+  const showPerformanceNav = canAccessPerformanceTracking(
+    user?.roles,
+    user?.permissions ?? []
+  );
+  const showSettings = !juniorOnly;
 
   return (
     <aside
@@ -84,7 +96,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1 scrollbar-none">
         {navItems
-          .filter((item) => !('requiresAuditAccess' in item && item.requiresAuditAccess) || showAuditNav)
+          .filter((item) => {
+            if (juniorOnly && !('juniorVisible' in item && item.juniorVisible)) return false;
+            if ('requiresAuditAccess' in item && item.requiresAuditAccess && !showAuditNav) return false;
+            return true;
+          })
           .map(({ to, icon: Icon, label, badge }) => {
           const path = location.pathname;
           const isActive =
@@ -137,6 +153,50 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           return <div key={to}>{linkContent}</div>;
         })}
 
+        {/* ── Performance tracking (director / DGO / oversight) ── */}
+        {showPerformanceNav && (
+          <>
+            {!collapsed && (
+              <div className="px-3 pt-3 pb-1">
+                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest">
+                  Insights
+                </p>
+              </div>
+            )}
+            {collapsed && <div className="my-1 mx-2 h-px bg-sidebar-border" />}
+            {(() => {
+              const to = '/performance';
+              const Icon = Trophy;
+              const label = 'Performance';
+              const isActive = location.pathname.startsWith('/performance');
+              const linkContent = (
+                <NavLink
+                  to={to}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                    collapsed ? 'justify-center px-0 w-10 mx-auto' : '',
+                    isActive
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
+                  )}
+                >
+                  <Icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </NavLink>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={to} delayDuration={0}>
+                    <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+                    <TooltipContent side="right">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              }
+              return <div key={to}>{linkContent}</div>;
+            })()}
+          </>
+        )}
+
         {/* ── Template management (admin / records roles) ── */}
         {showTemplateMgmt && (
           <>
@@ -183,7 +243,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {/* ── Admin section (user directory for document creators + admins) ── */}
-        {showUserDirectory && (
+        {showUserManagement && (
           <>
             {!collapsed && (
               <div className="px-3 pt-3 pb-1">
@@ -224,35 +284,36 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* ── Bottom section ── */}
       <div className="border-t border-sidebar-border p-2 space-y-1">
-        {/* Settings link */}
-        {collapsed ? (
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <NavLink
-                to="/settings"
-                className="flex items-center justify-center w-10 mx-auto rounded-lg py-2.5 text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground transition-all"
-              >
-                <Settings className="h-5 w-5" />
-              </NavLink>
-            </TooltipTrigger>
-            <TooltipContent side="right">Settings</TooltipContent>
-          </Tooltip>
-        ) : (
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
-              )
-            }
-          >
-            <Settings className="h-4 w-4 shrink-0" />
-            <span>Settings</span>
-          </NavLink>
-        )}
+        {/* Settings link — hidden for junior staff (officer / senior_officer only) */}
+        {showSettings &&
+          (collapsed ? (
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <NavLink
+                  to="/settings"
+                  className="flex items-center justify-center w-10 mx-auto rounded-lg py-2.5 text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground transition-all"
+                >
+                  <Settings className="h-5 w-5" />
+                </NavLink>
+              </TooltipTrigger>
+              <TooltipContent side="right">Settings</TooltipContent>
+            </Tooltip>
+          ) : (
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+                  isActive
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
+                )
+              }
+            >
+              <Settings className="h-4 w-4 shrink-0" />
+              <span>Settings</span>
+            </NavLink>
+          ))}
 
         {/* User info — expanded only */}
         {!collapsed && user && (

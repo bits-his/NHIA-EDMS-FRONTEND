@@ -7,6 +7,9 @@ export type DocumentStatus =
 
 export type DocumentCategory = 'internal_memo' | 'external_correspondence';
 
+/** Registry direction for external correspondence tracking IDs. */
+export type CorrespondenceDirection = 'incoming' | 'outgoing';
+
 export type DocumentUrgency = 'normal' | 'urgent' | 'very_urgent';
 
 export type DocumentDeliveryMode = 'workflow' | 'direct_message';
@@ -39,6 +42,11 @@ export interface Document {
   updated_at: string;
   category?: DocumentCategory | null;
   ref_number?: string | null;
+  /** NHIA/IN|OUT/{DEPT}/{YEAR}/{SEQ} — external correspondence registry */
+  tracking_id?: string | null;
+  correspondence_direction?: CorrespondenceDirection | null;
+  archived_at?: string | null;
+  archived_by?: string | null;
   department?: string | null;
   urgency?: DocumentUrgency | null;
   template_id?: string | null;
@@ -115,6 +123,8 @@ export interface CreateDocumentRequest extends Partial<DocumentCreationProfile> 
   template_id?: string;
   /** Omit for auto-generated ref; must be unique when set. */
   ref_number?: string;
+  correspondence_direction?: CorrespondenceDirection;
+  tracking_id?: string;
   recipients?: CreateRecipientInput[];
 }
 
@@ -136,8 +146,11 @@ export interface UpdateDocumentResponse {
 
 export interface DocumentSearchFilters {
   ref_number?: string;
+  tracking_id?: string;
+  correspondence_direction?: CorrespondenceDirection;
   date_from?: string;
   date_to?: string;
   keyword?: string;
   category?: DocumentCategory;
+  status?: DocumentStatus;
 }

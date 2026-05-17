@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
-import { ProtectedRoute, PublicRoute, RoleGuard, CanCreateDocumentGuard } from './guards';
+import { ProtectedRoute, PublicRoute, RoleGuard } from './guards';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/shared/PageLoader';
 
@@ -8,6 +8,7 @@ import { PageLoader } from '@/components/shared/PageLoader';
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
 const ExecutiveReportPage = lazy(() => import('@/pages/dashboard/ExecutiveReportPage'));
+const PerformancePage = lazy(() => import('@/pages/performance/PerformancePage'));
 const DocumentsPage = lazy(() => import('@/pages/documents/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('@/pages/documents/DocumentDetailPage'));
 const CreateDocumentPage = lazy(() => import('@/pages/documents/CreateDocumentPage'));
@@ -60,6 +61,14 @@ const routerConfig = [
         element: (
           <Wrap>
             <ExecutiveReportPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'performance',
+        element: (
+          <Wrap>
+            <PerformancePage />
           </Wrap>
         ),
       },
@@ -168,9 +177,9 @@ const routerConfig = [
         path: 'admin/users',
         element: (
           <Wrap>
-            <CanCreateDocumentGuard fallback={<Navigate to="/dashboard" replace />}>
+            <RoleGuard roles={['admin']} fallback={<Navigate to="/dashboard" replace />}>
               <UsersPage />
-            </CanCreateDocumentGuard>
+            </RoleGuard>
           </Wrap>
         ),
       },

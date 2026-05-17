@@ -16,7 +16,8 @@ import { formatDateTime } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { DOCUMENT_STATUS_CONFIG } from '@/utils/constants';
 import { cn } from '@/utils/cn';
-import type { DocumentStatus, DocumentVersion, DocumentWorkflowAction } from '@/types/document';
+import type { CorrespondenceDirection, DocumentStatus, DocumentVersion, DocumentWorkflowAction } from '@/types/document';
+import { correspondenceDirectionLabel } from '@/utils/correspondence';
 
 const ACTION_LABELS: Record<string, string> = {
   reject: 'Rejected',
@@ -131,6 +132,9 @@ interface DocumentActivitySidebarProps {
   pendingStageLabel?: string | null;
   assignmentOverdue?: boolean;
   refNumber?: string | null;
+  trackingId?: string | null;
+  correspondenceDirection?: CorrespondenceDirection | null;
+  archivedAt?: string | null;
   documentTitle: string;
   ownerDisplayName: string;
   ownerRoleContext?: string | null;
@@ -150,6 +154,9 @@ export function DocumentActivitySidebar({
   pendingStageLabel,
   assignmentOverdue = false,
   refNumber,
+  trackingId,
+  correspondenceDirection,
+  archivedAt,
   documentTitle,
   ownerDisplayName,
   ownerRoleContext,
@@ -249,12 +256,32 @@ export function DocumentActivitySidebar({
                       <dt className="text-muted-foreground">Last updated</dt>
                       <dd className="font-medium tabular-nums text-right">{formatDateTime(updatedAt)}</dd>
                     </div>
+                    {trackingId?.trim() && (
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-muted-foreground">Tracking ID</dt>
+                        <dd className="font-mono text-xs text-right truncate max-w-[55%]" title={trackingId}>
+                          {trackingId}
+                        </dd>
+                      </div>
+                    )}
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Reference</dt>
                       <dd className="font-mono text-xs text-right truncate max-w-[55%]" title={refNumber ?? ''}>
                         {refNumber?.trim() || '—'}
                       </dd>
                     </div>
+                    {correspondenceDirection && (
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-muted-foreground">Direction</dt>
+                        <dd className="text-right">{correspondenceDirectionLabel(correspondenceDirection)}</dd>
+                      </div>
+                    )}
+                    {archivedAt && (
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-muted-foreground">Archived</dt>
+                        <dd className="font-medium tabular-nums text-right">{formatDateTime(archivedAt)}</dd>
+                      </div>
+                    )}
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Category</dt>
                       <dd className="text-right truncate max-w-[55%]">{categoryLabel}</dd>

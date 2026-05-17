@@ -13,6 +13,7 @@ import type {
   CreateRecipientInput,
   DocumentCreationProfile,
   DocumentUrgency,
+  CorrespondenceDirection,
 } from '@/types/document';
 import type { DocumentTemplate, SaveDocumentTemplatePayload } from '@/types/documentTemplate';
 import type { OrgScopeReferenceResponse } from '@/types/orgScope';
@@ -37,14 +38,23 @@ export const documentsApi = {
     file: File,
     title: string,
     department: string,
-    options?: { ref_number?: string; urgency?: DocumentUrgency } & Partial<DocumentCreationProfile>
+    options?: {
+      ref_number?: string;
+      correspondence_direction: CorrespondenceDirection;
+      tracking_id?: string;
+      urgency?: DocumentUrgency;
+    } & Partial<DocumentCreationProfile>
   ): Promise<CreateDocumentResponse> => {
     const form = new FormData();
     form.append('file', file);
     form.append('title', title);
     form.append('department', department);
+    form.append('correspondence_direction', options.correspondence_direction);
     if (options?.ref_number?.trim()) {
       form.append('ref_number', options.ref_number.trim());
+    }
+    if (options?.tracking_id?.trim()) {
+      form.append('tracking_id', options.tracking_id.trim());
     }
     if (options?.urgency) {
       form.append('urgency', options.urgency);

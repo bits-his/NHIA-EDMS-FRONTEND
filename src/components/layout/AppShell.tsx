@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
+import { JuniorStaffRouteGuard } from '@/router/guards';
 import { Toaster } from 'sonner';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
@@ -9,13 +10,8 @@ import { useNotificationStore } from '@/stores/notificationStore';
 import { notificationsApi } from '@/api/notifications';
 
 export function AppShell() {
-  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const user = useAuthStore((s) => s.user);
-  const mainContentFullWidth =
-    location.pathname === '/documents' ||
-    location.pathname === '/documents/new' ||
-    /^\/documents\/[0-9a-f-]{36}$/i.test(location.pathname);
   const setNotifications = useNotificationStore((s) => s.setNotifications);
 
   useEffect(() => {
@@ -39,14 +35,10 @@ export function AppShell() {
         <div className="flex flex-1 flex-col overflow-hidden min-w-0">
           <Header />
           <main className="flex-1 overflow-y-auto">
-            <div
-              className={
-                mainContentFullWidth
-                  ? 'w-full min-w-0 px-5 py-6 sm:px-6 page-enter'
-                  : 'mx-auto max-w-7xl px-5 py-6 page-enter'
-              }
-            >
-              <Outlet />
+            <div className="w-full min-w-0 px-5 py-6 sm:px-6 lg:px-8 page-enter">
+              <JuniorStaffRouteGuard>
+                <Outlet />
+              </JuniorStaffRouteGuard>
             </div>
           </main>
         </div>

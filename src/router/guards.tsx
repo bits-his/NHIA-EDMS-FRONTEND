@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import type { ReactNode } from 'react';
-import { canCreateDocument } from '@/utils/permissions';
+import { canCreateDocument, isJuniorStaffOnly, isRouteAllowedForJuniorStaff } from '@/utils/permissions';
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -41,6 +41,18 @@ export function CanCreateDocumentGuard({
   if (!canCreateDocument(roles, permissions)) {
     return fallback ? <>{fallback}</> : null;
   }
+  return <>{children}</>;
+}
+
+/** Redirects officer / senior_officer users away from routes not in their allow-list. */
+export function JuniorStaffRouteGuard({ children }: { children: ReactNode }) {
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const location = useLocation();
+
+  if (isJuniorStaffOnly(roles) && !isRouteAllowedForJuniorStaff(location.pathname)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   return <>{children}</>;
 }
 

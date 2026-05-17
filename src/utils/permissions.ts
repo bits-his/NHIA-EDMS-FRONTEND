@@ -42,8 +42,6 @@ export function getDocumentActions(
   canEditForward: boolean;
   canApproveForward: boolean;
   canRequestInfo: boolean;
-  /** Pending direct-message: owner may approve (pending → approved) after recipient input. */
-  canApproveDirectMessage: boolean;
 } {
   const permissions = context.permissions ?? [];
   const isAdmin = roles.includes('admin');
@@ -71,14 +69,11 @@ export function getDocumentActions(
       canEditForward: true,
       canApproveForward: false,
       canRequestInfo: true,
-      canApproveDirectMessage: isDraftOwner,
     };
   }
 
   if (isDmOwner) {
-    // The original sender may mark the document reviewed. They can comment /
-    // forward only when the baton is explicitly sent back to them, handled by
-    // the active direct-message recipient branch above.
+    // Pending direct-message owner: no actions until the baton returns via recipient branch.
     return {
       canEdit: false,
       canSubmit: false,
@@ -88,7 +83,6 @@ export function getDocumentActions(
       canEditForward: false,
       canApproveForward: false,
       canRequestInfo: false,
-      canApproveDirectMessage: true,
     };
   }
 
@@ -107,12 +101,13 @@ export function getDocumentActions(
     canSubmit: status === 'draft' && canSubmitDraft,
     canFinalApprove: pendingMyStep,
     canReject: pendingMyStep,
-    canArchive: status === 'approved' && isAdmin,
+    canArchive:
+      status === 'approved' &&
+      (isAdmin || permissions.includes('archive_document')),
     /** Active step assignees may post a free-form comment on the document (no status change). */
     canEditForward: pendingMyStep,
     canApproveForward: pendingMyStep,
     canRequestInfo: pendingMyStep,
-    canApproveDirectMessage: false,
   };
 
   if (!pendingMyStep || workflowStepActionType == null || String(workflowStepActionType).trim() === '') {
@@ -128,7 +123,6 @@ export function getDocumentActions(
         ...base,
         canEdit: false,
         canApproveForward: false,
-        canApproveDirectMessage: false,
       };
     case 'review':
       // Forward-only step (no approve-forward / final approve here, but free-form comment is fine).
@@ -136,18 +130,36 @@ export function getDocumentActions(
         ...base,
         canApproveForward: false,
         canFinalApprove: false,
-        canApproveDirectMessage: false,
       };
     case 'approve':
     case 'approve_forward':
       return {
         ...base,
         canFinalApprove: false,
-        canApproveDirectMessage: false,
       };
     default:
       return base;
   }
+}
+
+/** Bottom of NHIA grade ladder — limited sidebar (dashboard, documents, notifications). */
+const JUNIOR_STAFF_ROLE_NAMES = new Set(['officer', 'senior_officer']);
+
+/**
+ * True when the user has **only** junior staff roles (no admin, manager grades, legacy roles, etc.).
+ */
+export function isJuniorStaffOnly(roles: string[]): boolean {
+  const normalized = roles.map((r) => String(r).toLowerCase()).filter(Boolean);
+  if (normalized.length === 0) return false;
+  return normalized.every((r) => JUNIOR_STAFF_ROLE_NAMES.has(r));
+}
+
+/** Routes junior staff may open (direct URL or sidebar). */
+export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
+  if (pathname === '/dashboard') return true;
+  if (pathname === '/notifications' || pathname.startsWith('/notifications/')) return true;
+  if (pathname === '/documents' || pathname.startsWith('/documents/')) return true;
+  return false;
 }
 
 export function showOfficerHomeDashboard(roles: string[]): boolean {
@@ -210,6 +222,14 @@ export function canViewOperationalOverview(roles: string[], permissions: string[
   return permissions.includes('manage_documents') || permissions.includes('manage_users');
 }
 
+/** Staff performance leaderboard and response-time analytics (director / DGO / oversight). */
+export function canAccessPerformanceTracking(
+  roles: string[] | undefined | null,
+  permissions: string[] = []
+): boolean {
+  return canViewOperationalOverview(roles ?? [], permissions);
+}
+
 /** Leadership (NHIA director grades + legacy `director`) may switch personal vs 360 home dashboard. */
 export function canDirectorToggleOperationalDashboard(roles: string[]): boolean {
   return hasRoleInSet(roles, DIRECTOR_DASHBOARD_TOGGLE_ROLE_NAMES);
@@ -263,4 +283,9 @@ export function canIndexSearch(roles: string[]): boolean {
 /** Enterprise template builder — administrators & records / submission roles. */
 export function canAccessTemplateManagement(roles: string[]): boolean {
   return roles.some((r) => ['admin', 'submitter', 'director'].includes(r));
+}
+
+/** User Management (`/admin/users`) — administrators only. */
+export function canManageUsers(roles: string[]): boolean {
+  return roles.some((r) => String(r).toLowerCase() === 'admin');
 }

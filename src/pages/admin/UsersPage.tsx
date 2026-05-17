@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useForm, Controller, useWatch } from 'react-hook-form';
@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import {
   Users, Shield, Key, Plus, Trash2, RefreshCw,
-  UserPlus, Edit, CheckSquare, Activity, X, Check,
+  UserPlus, Edit, CheckSquare, Activity, X, Check, Eye,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,13 +25,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { authApi } from '@/api/auth';
 import { documentsApi } from '@/api/documents';
-import { tasksApi } from '@/api/tasks';
 import { QUERY_KEYS, SEEDED_USER_IDS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
 import { formatDateTime } from '@/utils/formatters';
@@ -39,7 +39,6 @@ import { getErrorMessage } from '@/api/client';
 import type { Role } from '@/types/auth';
 import type { UserRecord } from '@/api/auth';
 import { useAuthStore } from '@/stores/authStore';
-import { canViewOperationalOverview } from '@/utils/permissions';
 
 const ROLE_COLORS: Record<string, string> = {
   admin:     'bg-violet-50 text-violet-700 ring-1 ring-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:ring-violet-800',
@@ -214,16 +213,139 @@ function UserRolesBadges({ u, allRoles }: { u: UserRecord; allRoles: Role[] | un
 
 const TH =
   'text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap';
-const TD = 'px-4 py-3 align-top text-sm whitespace-nowrap';
-const TD_WRAP = 'px-4 py-3 align-top text-sm max-w-[12rem]';
-const TD_MONO = 'px-4 py-3 align-top text-xs font-mono text-muted-foreground max-w-[9rem] truncate';
+const TD = 'px-4 py-3 align-top text-sm';
+
+function accountStatusBadge(status: string | null | undefined) {
+  const s = (status ?? 'unknown').toLowerCase();
+  const styles =
+    s === 'active'
+      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:ring-emerald-800'
+      : s === 'inactive' || s === 'deactivated'
+        ? 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-900/20 dark:text-red-400 dark:ring-red-800'
+        : 'bg-muted text-muted-foreground ring-border';
+  return (
+    <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ring-1', styles)}>
+      {displayOrDash(status)}
+    </span>
+  );
+}
+
+function organisationSummary(u: UserRecord): string {
+  const parts = [u.department, u.unit, u.zone, u.state].map((p) => p?.trim()).filter(Boolean);
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[9rem_1fr] gap-1 sm:gap-4 py-2.5 border-b border-border/50 last:border-0">
+      <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</dt>
+      <dd className={cn('text-sm text-foreground', mono && 'font-mono text-xs break-all')}>{value}</dd>
+    </div>
+  );
+}
+
+function UserDetailDialog({
+  user,
+  allRoles,
+  usersById,
+  open,
+  onOpenChange,
+}: {
+  user: UserRecord | null;
+  allRoles: Role[] | undefined;
+  usersById: Map<string, UserRecord>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!user) return null;
+  const primaryRole = user.primary_role_id ? allRoles?.find((r) => r.id === user.primary_role_id) : undefined;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[min(90vh,42rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{userPrimaryLabel(user)}</DialogTitle>
+          <DialogDescription>
+            @{user.username}
+            {user.staff_id ? ` · ${user.staff_id}` : ''}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">Contact</p>
+          <DetailRow label="Email" value={displayOrDash(user.email)} />
+          <DetailRow label="Phone" value={displayOrDash(user.phone)} />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Organisation</p>
+          <DetailRow label="Rank" value={displayOrDash(user.rank)} />
+          <DetailRow label="Grade" value={displayOrDash(user.grade_level)} />
+          <DetailRow label="Department" value={displayOrDash(user.department)} />
+          <DetailRow label="Unit" value={displayOrDash(user.unit)} />
+          <DetailRow label="Zone" value={displayOrDash(user.zone)} />
+          <DetailRow label="State office" value={displayOrDash(user.state)} />
+          <DetailRow label="Supervisor" value={supervisorLabelFor(user, usersById)} />
+          <DetailRow label="Employment" value={displayOrDash(user.employment_type)} />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Access & security</p>
+          <DetailRow
+            label="Roles"
+            value={<UserRolesBadges u={user} allRoles={allRoles} />}
+          />
+          <DetailRow label="Primary role" value={primaryRole ? roleDisplayLabel(primaryRole) : '—'} />
+          <DetailRow label="Account" value={accountStatusBadge(user.account_status)} />
+          <DetailRow label="Clearance" value={displayOrDash(user.clearance_level)} />
+          <DetailRow label="MFA" value={displayOrDash(user.mfa_enabled)} />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Activity</p>
+          <DetailRow
+            label="Member since"
+            value={user.created_at ? formatDateTime(user.created_at) : '—'}
+          />
+          <DetailRow
+            label="Last login"
+            value={user.last_login_at ? formatDateTime(user.last_login_at) : '—'}
+          />
+          <DetailRow label="Profile photo" value={displayOrDash(user.photo_path?.trim() ? 'On file' : null)} />
+          <DetailRow label="Signature" value={displayOrDash(user.signature_path?.trim() ? 'On file' : null)} />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">System IDs</p>
+          <DetailRow label="User ID" value={user.id} mono />
+          <DetailRow label="Dept ID" value={displayOrDash(user.nhia_department_id)} mono />
+          <DetailRow label="Unit ID" value={displayOrDash(user.nhia_unit_id)} mono />
+          <DetailRow label="State office ID" value={displayOrDash(user.nhia_state_office_id)} mono />
+          <DetailRow label="Zone ID" value={displayOrDash(user.nhia_zone_id)} mono />
+          <DetailRow label="Directorate ID" value={displayOrDash(user.nhia_directorate_id)} mono />
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function UsersTable({
   users,
   allRoles,
-  usersById,
-  taskMap,
-  showTaskCounts,
   canManageUsers,
   canViewAuditNav,
   onEditProfile,
@@ -231,12 +353,10 @@ function UsersTable({
   onResetPassword,
   onDeactivate,
   onViewAudit,
+  onViewDetails,
 }: {
   users: UserRecord[];
   allRoles: Role[] | undefined;
-  usersById: Map<string, UserRecord>;
-  taskMap: Record<string, number> | undefined;
-  showTaskCounts: boolean;
   canManageUsers: boolean;
   canViewAuditNav: boolean;
   onEditProfile: (u: UserRecord) => void;
@@ -244,53 +364,25 @@ function UsersTable({
   onResetPassword: (u: UserRecord) => void;
   onDeactivate: (u: UserRecord) => void;
   onViewAudit: () => void;
+  onViewDetails: (u: UserRecord) => void;
 }) {
-  const showActions = canManageUsers || canViewAuditNav;
-
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[120rem]">
+      <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/30">
-            <th className={TH}>Username</th>
-            <th className={TH}>Full name</th>
-            <th className={TH}>Email</th>
-            <th className={TH}>Phone</th>
-            <th className={TH}>Rank</th>
-            <th className={TH}>Department</th>
-            <th className={TH}>Unit</th>
-            <th className={TH}>Zone</th>
-            <th className={TH}>State</th>
+            <th className={cn(TH, 'min-w-[10rem]')}>Full name</th>
             <th className={TH}>Staff ID</th>
-            <th className={TH}>Employment</th>
-            <th className={TH}>Account</th>
-            <th className={TH}>Clearance</th>
-            <th className={TH}>Grade</th>
+            <th className={TH}>Contact</th>
+            <th className={cn(TH, 'min-w-[12rem]')}>Organisation</th>
+            <th className={TH}>Rank</th>
             <th className={TH}>Roles</th>
-            <th className={TH}>Primary role</th>
-            <th className={cn(TH, 'min-w-[10rem]')}>Supervisor</th>
-            <th className={TH}>MFA</th>
-            <th className={TH}>Photo</th>
-            <th className={TH}>Signature</th>
-            {showTaskCounts && <th className={TH}>Tasks</th>}
-            <th className={TH}>Member since</th>
-            <th className={TH}>Last login</th>
-            <th className={TH}>Dept ID</th>
-            <th className={TH}>Unit ID</th>
-            <th className={TH}>State office ID</th>
-            <th className={TH}>Zone ID</th>
-            <th className={TH}>Directorate ID</th>
-            <th className={TH}>User ID</th>
-            {showActions && (
-              <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right')}>Actions</th>
-            )}
+            <th className={TH}>Status</th>
+            <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right')}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {users.map((u, idx) => {
-            const primaryRole = u.primary_role_id ? allRoles?.find((r) => r.id === u.primary_role_id) : undefined;
-            const taskCount = taskMap?.[u.id] ?? 0;
-
             return (
               <tr
                 key={u.id}
@@ -299,94 +391,46 @@ function UsersTable({
                   idx % 2 !== 0 && 'bg-muted/10'
                 )}
               >
-                <td className={cn(TD, 'font-medium capitalize')}>{displayOrDash(u.username)}</td>
-                <td className={TD_WRAP}>{displayOrDash(u.full_name)}</td>
-                <td className={TD}>{displayOrDash(u.email)}</td>
-                <td className={TD}>{displayOrDash(u.phone)}</td>
-                <td className={TD_WRAP}>{displayOrDash(u.rank)}</td>
-                <td className={TD_WRAP}>{displayOrDash(u.department)}</td>
-                <td className={TD_WRAP}>{displayOrDash(u.unit)}</td>
-                <td className={TD}>{displayOrDash(u.zone)}</td>
-                <td className={TD_WRAP}>{displayOrDash(u.state)}</td>
-                <td className={TD}>{displayOrDash(u.staff_id)}</td>
-                <td className={TD}>{displayOrDash(u.employment_type)}</td>
-                <td className={TD}>{displayOrDash(u.account_status)}</td>
-                <td className={TD}>{displayOrDash(u.clearance_level)}</td>
-                <td className={TD}>{displayOrDash(u.grade_level)}</td>
+                <td className={cn(TD, 'min-w-[10rem]')}>
+                  <p className="font-medium text-foreground whitespace-normal">{displayOrDash(u.full_name)}</p>
+                  <p className="text-xs text-muted-foreground capitalize mt-0.5">@{displayOrDash(u.username)}</p>
+                </td>
+                <td className={cn(TD, 'tabular-nums')}>{displayOrDash(u.staff_id)}</td>
+                <td className={TD}>
+                  <p className="truncate" title={u.email ?? undefined}>{displayOrDash(u.email)}</p>
+                  {u.phone?.trim() ? (
+                    <p className="text-xs text-muted-foreground truncate" title={u.phone}>{u.phone}</p>
+                  ) : null}
+                </td>
+                <td className={cn(TD, 'whitespace-normal text-muted-foreground')}>
+                  {organisationSummary(u)}
+                </td>
+                <td className={TD}>{displayOrDash(u.rank ?? u.grade_level)}</td>
                 <td className="px-4 py-3 align-top">
                   <UserRolesBadges u={u} allRoles={allRoles} />
                 </td>
-                <td className={TD_WRAP}>
-                  {primaryRole ? roleDisplayLabel(primaryRole) : '—'}
-                </td>
-                <td className={cn(TD_WRAP, 'whitespace-normal min-w-[10rem]')}>
-                  {supervisorLabelFor(u, usersById)}
-                </td>
-                <td className={TD}>{displayOrDash(u.mfa_enabled)}</td>
-                <td className={TD}>{displayOrDash(u.photo_path?.trim() ? 'Yes' : null)}</td>
-                <td className={TD}>{displayOrDash(u.signature_path?.trim() ? 'Yes' : null)}</td>
-                {showTaskCounts && (
-                  <td className={TD}>
-                    {taskCount > 0 ? (
-                      <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
-                        {taskCount}
-                      </span>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                )}
-                <td className={cn(TD, 'tabular-nums text-xs')}>
-                  {u.created_at ? formatDateTime(u.created_at) : '—'}
-                </td>
-                <td className={cn(TD, 'tabular-nums text-xs')}>
-                  {u.last_login_at ? formatDateTime(u.last_login_at) : '—'}
-                </td>
-                <td className={TD_MONO} title={u.nhia_department_id ?? undefined}>
-                  {displayOrDash(u.nhia_department_id)}
-                </td>
-                <td className={TD_MONO} title={u.nhia_unit_id ?? undefined}>
-                  {displayOrDash(u.nhia_unit_id)}
-                </td>
-                <td className={TD_MONO} title={u.nhia_state_office_id ?? undefined}>
-                  {displayOrDash(u.nhia_state_office_id)}
-                </td>
-                <td className={TD_MONO} title={u.nhia_zone_id ?? undefined}>
-                  {displayOrDash(u.nhia_zone_id)}
-                </td>
-                <td className={TD_MONO} title={u.nhia_directorate_id ?? undefined}>
-                  {displayOrDash(u.nhia_directorate_id)}
-                </td>
-                <td className={TD_MONO} title={u.id}>
-                  {u.id}
-                </td>
-                {showActions && (
-                  <td
-                    className={cn(
-                      'px-4 py-3 align-top sticky right-0 z-10 text-right',
-                      idx % 2 !== 0 ? 'bg-muted/10' : 'bg-card'
-                    )}
-                  >
-                    <div className="flex items-center justify-end gap-0.5">
-                      {canManageUsers && (
-                        <>
-                          <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => onEditProfile(u)}>
-                            <Edit className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon-sm" title="Manage roles" onClick={() => onManageRoles(u)}>
-                            <Shield className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => onResetPassword(u)}>
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          </Button>
-                        </>
-                      )}
-                      {canViewAuditNav && (
-                        <Button variant="ghost" size="icon-sm" title="View audit logs" onClick={onViewAudit}>
-                          <Activity className="h-3.5 w-3.5" />
+                <td className={TD}>{accountStatusBadge(u.account_status)}</td>
+                <td
+                  className={cn(
+                    'px-4 py-3 align-top sticky right-0 z-10 text-right',
+                    idx % 2 !== 0 ? 'bg-muted/10' : 'bg-card'
+                  )}
+                >
+                  <div className="flex items-center justify-end gap-0.5">
+                    <Button variant="ghost" size="icon-sm" title="View full profile" onClick={() => onViewDetails(u)}>
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    {canManageUsers && (
+                      <>
+                        <Button variant="ghost" size="icon-sm" title="Edit profile" onClick={() => onEditProfile(u)}>
+                          <Edit className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                      {canManageUsers && (
+                        <Button variant="ghost" size="icon-sm" title="Manage roles" onClick={() => onManageRoles(u)}>
+                          <Shield className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => onResetPassword(u)}>
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -396,10 +440,15 @@ function UsersTable({
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                    </div>
-                  </td>
-                )}
+                      </>
+                    )}
+                    {canViewAuditNav && (
+                      <Button variant="ghost" size="icon-sm" title="View audit logs" onClick={onViewAudit}>
+                        <Activity className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </td>
               </tr>
             );
           })}
@@ -419,15 +468,15 @@ export default function UsersPage() {
   const canManageUsers = permissions.includes('manage_users');
   const canManageRoles = permissions.includes('manage_roles');
   const canViewAuditNav = roleNames.some((r) => ['admin', 'director', 'general_manager'].includes(String(r).toLowerCase()));
-  const showTaskCounts = canManageUsers || canViewOperationalOverview(roleNames, permissions);
-
   const [createUserOpen,    setCreateUserOpen]    = useState(false);
   const [createRoleOpen,    setCreateRoleOpen]     = useState(false);
   const [resetPwUser,       setResetPwUser]        = useState<UserRecord | null>(null);
   const [deactivateUser,    setDeactivateUser]     = useState<UserRecord | null>(null);
   const [manageRolesUser,   setManageRolesUser]    = useState<UserRecord | null>(null);
   const [editProfileUser,   setEditProfileUser]    = useState<UserRecord | null>(null);
+  const [viewUser,          setViewUser]           = useState<UserRecord | null>(null);
   const [editPermRole,      setEditPermRole]       = useState<Role | null>(null);
+  const [activeTab,         setActiveTab]          = useState<'users' | 'permissions'>('users');
 
   // ── Queries ──
   const { data: users, isLoading: usersLoading } = useQuery({
@@ -458,23 +507,6 @@ export default function UsersPage() {
     [users]
   );
 
-  // Task counts per user
-  const { data: taskMap } = useQuery({
-    queryKey: ['admin-task-counts'],
-    queryFn: async () => {
-      const ids = (users ?? []).map((u) => u.id);
-      const results = await Promise.allSettled(ids.map((id) => tasksApi.list(id)));
-      const map: Record<string, number> = {};
-      ids.forEach((id, i) => {
-        const r = results[i];
-        map[id] = r.status === 'fulfilled' ? r.value.filter((t) => t.status === 'pending' || t.status === 'in_progress').length : 0;
-      });
-      return map;
-    },
-    enabled: !!users?.length && showTaskCounts,
-    staleTime: 30_000,
-  });
-
   // ── Mutations ──
   const deactivateMutation = useMutation({
     mutationFn: (userId: string) => authApi.deactivateUser(userId),
@@ -498,19 +530,14 @@ export default function UsersPage() {
             : 'Browse users and roles (same directory as document recipient selection)'
         }
         actions={
-          (canManageUsers || canManageRoles) ? (
-          <div className="flex items-center gap-2">
-            {canManageRoles && (
-            <Button variant="outline" size="sm" onClick={() => setCreateRoleOpen(true)}>
-              <Shield className="h-4 w-4" /> New Role
-            </Button>
-            )}
-            {canManageUsers && (
+          activeTab === 'users' && canManageUsers ? (
             <Button size="sm" onClick={() => setCreateUserOpen(true)}>
               <UserPlus className="h-4 w-4" /> New User
             </Button>
-            )}
-          </div>
+          ) : activeTab === 'permissions' && canManageRoles ? (
+            <Button variant="outline" size="sm" onClick={() => setCreateRoleOpen(true)}>
+              <Shield className="h-4 w-4" /> New Role
+            </Button>
           ) : undefined
         }
       />
@@ -532,112 +559,167 @@ export default function UsersPage() {
         ))}
       </div>
 
-      {/* Users table */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Users</h2>
-        <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            {isLoading ? (
-              <div className="p-5 space-y-3">
-                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
-              </div>
-            ) : !users?.length ? (
-              <EmptyState icon={Users} title="No users found" description="Create the first user to get started" />
-            ) : (
-              <UsersTable
-                users={users}
-                allRoles={allRoles}
-                usersById={usersById}
-                taskMap={taskMap}
-                showTaskCounts={showTaskCounts}
-                canManageUsers={canManageUsers}
-                canViewAuditNav={canViewAuditNav}
-                onEditProfile={setEditProfileUser}
-                onManageRoles={setManageRolesUser}
-                onResetPassword={setResetPwUser}
-                onDeactivate={setDeactivateUser}
-                onViewAudit={() => navigate('/audit')}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as 'users' | 'permissions')}
+        className="space-y-4"
+      >
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="users" className="gap-1.5 px-4 py-2">
+            <Users className="h-3.5 w-3.5" />
+            Users
+            <span className="tabular-nums opacity-80">({usersLoading ? '…' : (users?.length ?? 0)})</span>
+          </TabsTrigger>
+          <TabsTrigger value="permissions" className="gap-1.5 px-4 py-2">
+            <Key className="h-3.5 w-3.5" />
+            Roles &amp; permissions
+            <span className="tabular-nums opacity-80">({rolesLoading ? '…' : (allRoles?.length ?? 0)})</span>
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Roles table */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Roles & Permissions</h2>
-        <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            {rolesLoading ? (
-              <div className="p-5 space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
-                    {ALL_PERMISSIONS.map((p) => (
-                      <th key={p} className="text-center px-2 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide max-w-[5rem] leading-tight">
-                        {p.replace(/_/g, ' ')}
+        <TabsContent value="users" className="mt-0 space-y-3">
+          <Card>
+            <CardContent className="p-0 overflow-x-auto">
+              {usersLoading ? (
+                <div className="p-5 space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : !users?.length ? (
+                <EmptyState icon={Users} title="No users found" description="Create the first user to get started" />
+              ) : (
+                <UsersTable
+                  users={users}
+                  allRoles={allRoles}
+                  canManageUsers={canManageUsers}
+                  canViewAuditNav={canViewAuditNav}
+                  onEditProfile={setEditProfileUser}
+                  onManageRoles={setManageRolesUser}
+                  onResetPassword={setResetPwUser}
+                  onDeactivate={setDeactivateUser}
+                  onViewAudit={() => navigate('/audit')}
+                  onViewDetails={setViewUser}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="permissions" className="mt-0 space-y-3">
+          <Card>
+            <CardContent className="p-0 overflow-x-auto">
+              {rolesLoading ? (
+                <div className="p-5 space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Role
                       </th>
-                    ))}
-                    <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned to</th>
-                    <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {canManageRoles ? 'Actions' : ''}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(allRoles ?? []).map((role, idx) => {
-                    const assignedUsers = (users ?? []).filter((u) => u.roles.some((r) => r.id === role.id));
-                    return (
-                      <tr key={role.id} className={cn('border-b border-border/50 last:border-0', idx % 2 !== 0 && 'bg-muted/20')}>
-                        <td className="px-5 py-3.5">
-                          <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full capitalize', ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground')}>
-                            {roleDisplayLabel(role)}
-                          </span>
-                        </td>
-                        {ALL_PERMISSIONS.map((p) => (
-                          <td key={p} className="text-center px-4 py-3.5">
-                            {permissionHas(role.permissions ?? [], p) ? (
-                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">✓</span>
+                      {ALL_PERMISSIONS.map((p) => (
+                        <th
+                          key={p}
+                          className="text-center px-2 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide max-w-[5rem] leading-tight"
+                        >
+                          {p.replace(/_/g, ' ')}
+                        </th>
+                      ))}
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Assigned to
+                      </th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        {canManageRoles ? 'Actions' : ''}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(allRoles ?? []).map((role, idx) => {
+                      const assignedUsers = (users ?? []).filter((u) =>
+                        u.roles.some((r) => r.id === role.id)
+                      );
+                      return (
+                        <tr
+                          key={role.id}
+                          className={cn(
+                            'border-b border-border/50 last:border-0',
+                            idx % 2 !== 0 && 'bg-muted/20'
+                          )}
+                        >
+                          <td className="px-5 py-3.5">
+                            <span
+                              className={cn(
+                                'text-xs font-semibold px-2.5 py-1 rounded-full capitalize',
+                                ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground'
+                              )}
+                            >
+                              {roleDisplayLabel(role)}
+                            </span>
+                          </td>
+                          {ALL_PERMISSIONS.map((p) => (
+                            <td key={p} className="text-center px-4 py-3.5">
+                              {permissionHas(role.permissions ?? [], p) ? (
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">
+                                  ✓
+                                </span>
+                              ) : (
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/40 text-xs mx-auto">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          ))}
+                          <td className="px-5 py-3.5">
+                            <div className="flex gap-1.5 flex-wrap">
+                              {assignedUsers.length > 0 ? (
+                                assignedUsers.map((u) => (
+                                  <span
+                                    key={u.id}
+                                    className="text-xs font-medium bg-muted px-2 py-0.5 rounded-full capitalize"
+                                  >
+                                    {u.username}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Unassigned</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            {canManageRoles ? (
+                              <Button size="sm" variant="outline" onClick={() => setEditPermRole(role)}>
+                                <Edit className="h-3.5 w-3.5" />
+                                Edit permissions
+                              </Button>
                             ) : (
-                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/40 text-xs mx-auto">—</span>
+                              <span className="text-xs text-muted-foreground">—</span>
                             )}
                           </td>
-                        ))}
-                        <td className="px-5 py-3.5">
-                          <div className="flex gap-1.5 flex-wrap">
-                            {assignedUsers.length > 0
-                              ? assignedUsers.map((u) => (
-                                  <span key={u.id} className="text-xs font-medium bg-muted px-2 py-0.5 rounded-full capitalize">{u.username}</span>
-                                ))
-                              : <span className="text-xs text-muted-foreground">Unassigned</span>
-                            }
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          {canManageRoles ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditPermRole(role)}
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                            Edit permissions
-                          </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <UserDetailDialog
+        user={viewUser}
+        allRoles={allRoles}
+        usersById={usersById}
+        open={!!viewUser}
+        onOpenChange={(open) => {
+          if (!open) setViewUser(null);
+        }}
+      />
 
       {/* ── Dialogs ── */}
       <CreateUserDialog
