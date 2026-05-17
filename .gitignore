@@ -27,3 +27,6 @@ dist-ssr
 
 # TypeScript build cache
 *.tsbuildinfo
+
+# Local deploy artifacts
+*.zip
