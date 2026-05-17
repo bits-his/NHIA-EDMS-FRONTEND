@@ -27,7 +27,7 @@ export default function DesignationsAdminPage() {
   const mutation = useMutation({
     mutationFn: async () => {
       if (!edit) return;
-      return authApi.patchDesignation(edit.id, {
+      return authApi.patchDesignation(String(edit.id), {
         hierarchy_order: Number(edit.hierarchy_order),
         approval_authority_level: Number(edit.approval_authority_level),
         workflow_signing_level: Number(edit.workflow_signing_level),

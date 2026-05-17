@@ -69,10 +69,10 @@ export default function OrganizationStructurePage() {
                     </Badge>
                   </div>
                   <ul className="mt-2 ml-2 space-y-1 border-l-2 border-primary/20 pl-3">
-                    {(z.stateOffices ?? []).map((s: Record<string, unknown>) => (
-                      <li key={Number(s.id)} className="flex items-center gap-1 text-muted-foreground">
+                    {(z.stateOffices ?? []).map((s) => (
+                      <li key={s.id} className="flex items-center gap-1 text-muted-foreground">
                         <ChevronRight className="h-3 w-3 shrink-0 text-primary" />
-                        {String(s.name ?? '')}
+                        {s.name}
                       </li>
                     ))}
                   </ul>

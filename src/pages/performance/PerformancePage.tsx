@@ -349,9 +349,10 @@ export default function PerformancePage() {
                           border: '1px solid hsl(var(--border))',
                           fontSize: 12,
                         }}
-                        formatter={(value: number, name: string) => {
-                          if (name === 'avg_hours') return [formatHours(value), 'Avg response'];
-                          return [value, 'Completed'];
+                        formatter={(value, name) => {
+                          const n = typeof value === 'number' ? value : Number(value ?? 0);
+                          if (name === 'avg_hours') return [formatHours(n), 'Avg response'];
+                          return [n, 'Completed'];
                         }}
                       />
                       <Line

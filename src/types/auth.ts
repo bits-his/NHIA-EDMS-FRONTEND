@@ -71,3 +71,67 @@ export type NHPermission =
   | 'manage_roles';
 
 export type Permission = LegacyPermission | NHPermission | string;
+
+/** Official NHIA rank ladder (GET /auth/designations). */
+export interface NhiaDesignationDto {
+  id: string | number;
+  slug: string;
+  title: string;
+  hierarchy_order: number;
+  approval_authority_level: number;
+  workflow_signing_level: number;
+  escalation_level: number;
+  delegation_allowed: boolean;
+  is_active: boolean;
+}
+
+export interface OrgHierarchyHeadquarters {
+  id: number;
+  name: string;
+  code?: string;
+  is_active: boolean;
+}
+
+export interface OrgHierarchyStateOffice {
+  id: number;
+  name: string;
+  zone_id?: number | null;
+  zone_code?: string;
+}
+
+export interface OrgHierarchyZone {
+  id: number;
+  code: string;
+  name: string;
+  stateOffices?: OrgHierarchyStateOffice[];
+}
+
+export interface OrgHierarchyResponse {
+  headquarters: OrgHierarchyHeadquarters[];
+  zones: OrgHierarchyZone[];
+  directorates?: Array<Record<string, unknown>>;
+  departmentsWithoutDirectorate?: Array<{ id: number; name: string }>;
+}
+
+export interface UserAdminDetail extends UserProfile {
+  roles: Role[];
+  permission_grants?: string[];
+  assignments?: Array<Record<string, unknown>>;
+  account_status?: string | null;
+  designation_id?: string | number | null;
+  staff_id?: string | null;
+  mfa_enabled?: boolean | null;
+  nhia_department_id?: string | number | null;
+  nhia_unit_id?: string | number | null;
+}
+
+export interface WorkflowAuthoritySupervisor {
+  id: string;
+  username?: string;
+  full_name?: string | null;
+  designation_title?: string | null;
+}
+
+export interface WorkflowAuthorityResponse {
+  supervisor_chain: WorkflowAuthoritySupervisor[];
+}

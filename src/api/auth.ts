@@ -6,6 +6,10 @@ import type {
   UserRolesResponse,
   Role,
   UserProfile,
+  NhiaDesignationDto,
+  OrgHierarchyResponse,
+  UserAdminDetail,
+  WorkflowAuthorityResponse,
 } from '@/types/auth';
 
 export interface UserRecord {
@@ -167,6 +171,49 @@ export const authApi = {
     metadata?: Record<string, unknown>;
   }): Promise<unknown> => {
     const res = await authClient.post('/auth/delegations', data);
+    return res.data;
+  },
+
+  revokeDelegation: async (delegationId: string): Promise<unknown> => {
+    const res = await authClient.post(`/auth/delegations/${delegationId}/revoke`);
+    return res.data;
+  },
+
+  getDesignations: async (): Promise<NhiaDesignationDto[]> => {
+    const res = await authClient.get<NhiaDesignationDto[]>('/auth/designations');
+    return res.data;
+  },
+
+  patchDesignation: async (
+    id: string,
+    data: Partial<
+      Pick<
+        NhiaDesignationDto,
+        | 'hierarchy_order'
+        | 'approval_authority_level'
+        | 'workflow_signing_level'
+        | 'escalation_level'
+        | 'delegation_allowed'
+        | 'is_active'
+      >
+    >
+  ): Promise<NhiaDesignationDto> => {
+    const res = await authClient.patch<NhiaDesignationDto>(`/auth/designations/${id}`, data);
+    return res.data;
+  },
+
+  getOrgHierarchy: async (): Promise<OrgHierarchyResponse> => {
+    const res = await authClient.get<OrgHierarchyResponse>('/auth/org/hierarchy');
+    return res.data;
+  },
+
+  getUserAdminDetail: async (userId: string): Promise<UserAdminDetail> => {
+    const res = await authClient.get<UserAdminDetail>(`/auth/users/${userId}/detail`);
+    return res.data;
+  },
+
+  getWorkflowAuthority: async (userId: string): Promise<WorkflowAuthorityResponse> => {
+    const res = await authClient.get<WorkflowAuthorityResponse>(`/auth/users/${userId}/workflow-authority`);
     return res.data;
   },
 };

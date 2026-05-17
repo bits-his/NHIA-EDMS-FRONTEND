@@ -13,6 +13,7 @@ import {
   Users,
   Layers,
   Trophy,
+  type LucideIcon,
 } from 'lucide-react';
 import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
 import { cn } from '@/utils/cn';
@@ -28,7 +29,16 @@ import { formatAuthRolesForDisplay } from '@/utils/workflowEditor';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-const navItems = [
+type NavItem = {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  juniorVisible?: boolean;
+  requiresAuditAccess?: boolean;
+  badge?: boolean;
+};
+
+const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', juniorVisible: true },
   { to: '/documents', icon: FileText, label: 'Documents', juniorVisible: true },
   { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
@@ -36,7 +46,7 @@ const navItems = [
   { to: '/audit', icon: Shield, label: 'Audit Log', requiresAuditAccess: true },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true, juniorVisible: true },
   { to: '/search', icon: Search, label: 'Search & OCR' },
-] as const;
+];
 
 const adminNavItems = [
   { to: '/admin/users', icon: Users, label: 'User Management' },

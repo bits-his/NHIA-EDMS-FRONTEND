@@ -49,7 +49,7 @@ export const documentsApi = {
     form.append('file', file);
     form.append('title', title);
     form.append('department', department);
-    form.append('correspondence_direction', options.correspondence_direction);
+    form.append('correspondence_direction', options?.correspondence_direction ?? 'incoming');
     if (options?.ref_number?.trim()) {
       form.append('ref_number', options.ref_number.trim());
     }
