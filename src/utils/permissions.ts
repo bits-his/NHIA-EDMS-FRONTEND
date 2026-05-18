@@ -162,6 +162,7 @@ export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
   if (pathname === '/operational' || pathname.startsWith('/operational')) return true;
   if (pathname === '/archive' || pathname.startsWith('/archive')) return true;
   if (pathname === '/reports' || pathname.startsWith('/reports')) return true;
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) return true;
   return false;
 }
 

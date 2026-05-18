@@ -224,6 +224,8 @@ export function DocumentActions({
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
+  const isDirectMessage = document.delivery_mode === 'direct_message';
+
   const openCommentDialog = (kind: CommentDialogKind) => {
     setComment('');
     setCommentDialog(kind);
@@ -257,8 +259,9 @@ export function DocumentActions({
             }
             return updated;
           },
-          message:
-            (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
+          message: isDirectMessage
+            ? 'Document returned to the sender'
+            : (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
               ? 'Document rejected — workflow returned to the previous step'
               : 'Document rejected',
         });
@@ -267,7 +270,11 @@ export function DocumentActions({
         mutation.mutate({
           fn: async () => {
             const updated = await documentsApi.requestInfo(document.id, c);
-            if (workflowInstanceId && (workflowCurrentStep ?? 0) > 1) {
+            if (
+              !isDirectMessage &&
+              workflowInstanceId &&
+              (workflowCurrentStep ?? 0) > 1
+            ) {
               try {
                 const res = await workflowApi.stepBack(workflowInstanceId, c);
                 if (res?.workflow?.id) invalidateAfterWorkflow(res.workflow.id);
@@ -279,8 +286,9 @@ export function DocumentActions({
             }
             return updated;
           },
-          message:
-            (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
+          message: isDirectMessage
+            ? 'Information request sent — document returned to the sender'
+            : (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
               ? 'Information request recorded — workflow returned to the previous step'
               : 'Information request recorded',
         });
@@ -313,14 +321,16 @@ export function DocumentActions({
   > = {
     reject: {
       title: 'Reject document',
-      description:
-        'Provide a reason for rejection. The document will move to rejected status. When this memo has an active workflow beyond step 1, the workflow also moves back one step so the previous participant is notified.',
+      description: isDirectMessage
+        ? 'Provide a reason. The document will be sent back to whoever forwarded it to you so they can revise and resend.'
+        : 'Provide a reason for rejection. The document will move to rejected status. When this memo has an active workflow beyond step 1, the workflow also moves back one step so the previous participant is notified.',
       placeholder: 'Rejection reason…',
     },
     requestInfo: {
       title: 'Request more information',
-      description:
-        'Explain what additional information is needed. Status stays pending. When there is an active workflow beyond step 1, it moves back one step so the previous participant can respond.',
+      description: isDirectMessage
+        ? 'Explain what you need. The document will be sent back to whoever forwarded it to you so they can respond.'
+        : 'Explain what additional information is needed. Status stays pending. When there is an active workflow beyond step 1, it moves back one step so the previous participant can respond.',
       placeholder: 'What information is needed…',
     },
     approveForward: {
@@ -356,8 +366,8 @@ export function DocumentActions({
     actions.canArchive ||
     showApproveAndForward ||
     showReviewForward ||
-    actions.canRequestInfo ||
-    (!suppressWorkflowStepActions && actions.canEditForward);
+    (!isDirectMessage && actions.canRequestInfo) ||
+    (!isDirectMessage && !suppressWorkflowStepActions && actions.canEditForward);
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
 
@@ -401,13 +411,13 @@ export function DocumentActions({
             Approve and forward
           </Button>
         )}
-        {actions.canRequestInfo && (
+        {!isDirectMessage && actions.canRequestInfo && (
           <Button variant="outline" size="sm" onClick={() => openCommentDialog('requestInfo')}>
             <Info className="h-4 w-4" />
             Request info
           </Button>
         )}
-        {!suppressWorkflowStepActions && actions.canEditForward && (
+        {!isDirectMessage && !suppressWorkflowStepActions && actions.canEditForward && (
           <Button variant="outline" size="sm" onClick={() => openCommentDialog('directMessageComment')}>
             <MessageSquareWarning className="h-4 w-4" />
             Add comment

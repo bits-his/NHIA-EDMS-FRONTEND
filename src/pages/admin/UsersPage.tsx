@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useForm, Controller, useWatch } from 'react-hook-form';
@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import {
   Users, Shield, Key, Plus, Trash2, RefreshCw,
-  UserPlus, Edit, CheckSquare, Activity, X, Check, Eye,
+  UserPlus, Edit, CheckSquare, Activity, X, Check, Eye, Search,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -227,6 +227,42 @@ function UserRolesBadges({ u, allRoles }: { u: UserRecord; allRoles: Role[] | un
 const TH =
   'text-left px-3 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap';
 const TD = 'px-3 py-2.5 align-top text-xs overflow-hidden';
+const STICKY_ACTIONS_BASE_TH = 'sticky right-0 z-20 text-right bg-white dark:bg-muted';
+const STICKY_ACTIONS_BASE_TD = 'sticky right-0 z-20 text-right';
+const STICKY_ACTIONS_OVERLAP =
+  'border-l border-border shadow-[-8px_0_16px_-8px_rgba(15,23,42,0.12)] dark:shadow-[-8px_0_16px_-8px_rgba(0,0,0,0.35)]';
+
+function userTableRowBg(idx: number) {
+  return idx % 2 !== 0 ? 'bg-slate-50 dark:bg-muted/40' : 'bg-white dark:bg-card';
+}
+
+function userMatchesSearch(u: UserRecord, query: string, allRoles: Role[] | undefined): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const roleLabels = (u.roles ?? []).map((r) => {
+    const def = allRoles?.find((x) => x.id === r.id);
+    return roleDisplayLabel(def ?? r);
+  });
+  const haystack = [
+    u.full_name,
+    u.username,
+    u.email,
+    u.phone,
+    u.staff_id,
+    u.department,
+    u.unit,
+    u.zone,
+    u.state,
+    u.rank,
+    u.grade_level,
+    u.account_status,
+    ...roleLabels,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(q);
+}
 
 function accountStatusBadge(status: string | null | undefined) {
   const s = (status ?? 'unknown').toLowerCase();
@@ -403,8 +439,34 @@ function UsersTable({
   onViewAudit: () => void;
   onViewDetails: (u: UserRecord) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [actionsOverlap, setActionsOverlap] = useState(false);
+
+  const updateActionsOverlap = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setActionsOverlap(el.scrollWidth > el.clientWidth + 1);
+  }, []);
+
+  useEffect(() => {
+    updateActionsOverlap();
+    const el = scrollRef.current;
+    if (!el) return undefined;
+
+    const ro = new ResizeObserver(() => updateActionsOverlap());
+    ro.observe(el);
+    window.addEventListener('resize', updateActionsOverlap);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateActionsOverlap);
+    };
+  }, [users.length, updateActionsOverlap]);
+
+  const stickyTh = cn(STICKY_ACTIONS_BASE_TH, actionsOverlap && STICKY_ACTIONS_OVERLAP);
+  const stickyTd = cn(STICKY_ACTIONS_BASE_TD, actionsOverlap && STICKY_ACTIONS_OVERLAP);
+
   return (
-    <div className="overflow-x-auto">
+    <div ref={scrollRef} className="overflow-x-auto">
       <table className="w-full min-w-[68rem] table-fixed text-sm">
         <colgroup>
           <col style={{ width: '9rem' }} />
@@ -425,9 +487,7 @@ function UsersTable({
             <th className={TH}>Rank</th>
             <th className={TH}>Roles</th>
             <th className={TH}>Status</th>
-            <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]')}>
-              Actions
-            </th>
+            <th className={cn(TH, stickyTh)}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -435,12 +495,13 @@ function UsersTable({
             const orgLines = organisationCellLines(u);
             const orgTitle = organisationSummary(u);
             const rankLabel = displayOrDash(u.rank ?? u.grade_level);
+            const rowBg = userTableRowBg(idx);
             return (
               <tr
                 key={u.id}
                 className={cn(
-                  'border-b border-border/50 last:border-0 hover:bg-muted/20',
-                  idx % 2 !== 0 && 'bg-muted/10'
+                  'border-b border-border/50 last:border-0 hover:bg-muted/30',
+                  rowBg
                 )}
               >
                 <td className={TD}>
@@ -484,12 +545,7 @@ function UsersTable({
                   <UserRolesBadges u={u} allRoles={allRoles} />
                 </td>
                 <td className={TD}>{accountStatusBadge(u.account_status)}</td>
-                <td
-                  className={cn(
-                    'px-2 py-2.5 align-top sticky right-0 z-10 text-right overflow-visible shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]',
-                    idx % 2 !== 0 ? 'bg-muted/10' : 'bg-card'
-                  )}
-                >
+                <td className={cn('px-2 py-2.5 align-top overflow-visible', stickyTd, rowBg)}>
                   <div className="flex items-center justify-end gap-0.5">
                     <Button variant="ghost" size="icon-sm" title="View full profile" onClick={() => onViewDetails(u)}>
                       <Eye className="h-3.5 w-3.5" />
@@ -551,6 +607,8 @@ export default function UsersPage() {
   const [viewUser,          setViewUser]           = useState<UserRecord | null>(null);
   const [editPermRole,      setEditPermRole]       = useState<Role | null>(null);
   const [activeTab,         setActiveTab]          = useState<'users' | 'permissions'>('users');
+  const [userSearch,        setUserSearch]         = useState('');
+  const [statusFilter,      setStatusFilter]       = useState<'all' | 'active' | 'inactive'>('all');
 
   // ── Queries ──
   const { data: users, isLoading: usersLoading } = useQuery({
@@ -580,6 +638,15 @@ export default function UsersPage() {
     () => (users?.length ? sortUsersActiveFirst(users) : []),
     [users]
   );
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim();
+    return sortedUsers.filter((u) => {
+      if (statusFilter === 'active' && !isActiveUser(u)) return false;
+      if (statusFilter === 'inactive' && isActiveUser(u)) return false;
+      return userMatchesSearch(u, q, allRoles);
+    });
+  }, [sortedUsers, userSearch, statusFilter, allRoles]);
 
   const usersById = useMemo(
     () => new Map((users ?? []).map((u) => [u.id, u])),
@@ -658,7 +725,53 @@ export default function UsersPage() {
 
         <TabsContent value="users" className="mt-0 space-y-3">
           <Card>
-            <CardContent className="p-0 overflow-x-auto">
+            <CardHeader className="pb-3 space-y-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">User directory</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    {usersLoading
+                      ? 'Loading…'
+                      : `Showing ${filteredUsers.length} of ${sortedUsers.length} users`}
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto lg:min-w-[28rem]">
+                  <div className="relative flex-1 min-w-[12rem]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search name, username, email, staff ID, org…"
+                      className="h-10 pl-9 pr-9"
+                    />
+                    {userSearch.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => setUserSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(v) => setStatusFilter(v as 'all' | 'active' | 'inactive')}
+                  >
+                    <SelectTrigger className="h-10 w-full sm:w-[10.5rem]">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="active">Active only</SelectItem>
+                      <SelectItem value="inactive">Inactive only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0 overflow-x-auto border-t border-border">
               {usersLoading ? (
                 <div className="p-5 space-y-3">
                   {[1, 2, 3].map((i) => (
@@ -667,9 +780,15 @@ export default function UsersPage() {
                 </div>
               ) : !users?.length ? (
                 <EmptyState icon={Users} title="No users found" description="Create the first user to get started" />
+              ) : filteredUsers.length === 0 ? (
+                <EmptyState
+                  icon={Users}
+                  title="No matching users"
+                  description="Try a different search term or change the status filter."
+                />
               ) : (
                 <UsersTable
-                  users={sortedUsers}
+                  users={filteredUsers}
                   allRoles={allRoles}
                   canManageUsers={canManageUsers}
                   canViewAuditNav={canViewAuditNav}

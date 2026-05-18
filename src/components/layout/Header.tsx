@@ -17,8 +17,6 @@ import { cn } from '@/utils/cn';
 
 import { resolveUsername } from '@/utils/users';
 import { formatAuthRolesForDisplay, workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
-import { isJuniorStaffOnly } from '@/utils/permissions';
-
 // Map route paths to human-readable breadcrumb labels
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:     'Dashboard',
@@ -28,7 +26,7 @@ const ROUTE_LABELS: Record<string, string> = {
   archive:       'Document archive',
   reports:       'Reports',
   tasks:         'My Tasks',
-  audit:         'Audit Log',
+  audit:         'Audit log',
   notifications: 'Notifications',
   search:        'Search & OCR',
   settings:      'Settings',
@@ -95,8 +93,6 @@ export function Header() {
   const roleLabel = user?.roles[0] ? workflowAssigneeRoleLabel(user.roles[0]) : 'User';
   const displayName = user?.username ?? roleLabel;
   const initials = displayName.slice(0, 2).toUpperCase();
-  const juniorOnly = isJuniorStaffOnly(user?.roles ?? []);
-
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-5 shrink-0 gap-4">
       {/* Breadcrumb */}
@@ -160,14 +156,10 @@ export function Header() {
                 <p className="text-xs text-muted-foreground">{user?.roles?.length ? formatAuthRolesForDisplay(user.roles) : '—'}</p>
               </div>
             </DropdownMenuLabel>
-            {!juniorOnly && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/settings')}>
-                  <User className="h-4 w-4" /> Profile & Settings
-                </DropdownMenuItem>
-              </>
-            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate('/settings')}>
+              <User className="h-4 w-4" /> Profile & Settings
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive focus:bg-destructive/10">
               <LogOut className="h-4 w-4" /> Sign out
