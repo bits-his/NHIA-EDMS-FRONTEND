@@ -174,17 +174,35 @@ export function showOfficerHomeDashboard(roles: string[]): boolean {
   return roles.some((r) => r === 'officer' || r === 'senior_officer');
 }
 
+/** Legacy + NHIA grade roles — keep aligned with NHIA-EDMS-BACKEND/shared/documentCreatorAccess.js */
+const DOCUMENT_CREATOR_ROLES = new Set([
+  'admin',
+  'submitter',
+  'reviewer',
+  'director',
+  'sdo_director',
+  'officer',
+  'senior_officer',
+  'executive_secretary',
+  'general_manager',
+  'deputy_general_manager',
+  'assistant_general_manager',
+  'principal_manager',
+  'senior_manager',
+  'manager',
+  'assistant_manager',
+]);
+
 export function canCreateDocument(roles: string[], permissions: string[] = []): boolean {
+  const normalized = roles.map((r) => String(r).toLowerCase());
+  if (normalized.some((r) => DOCUMENT_CREATOR_ROLES.has(r))) return true;
   if (
-    roles.includes('admin') ||
-    roles.includes('submitter') ||
-    roles.includes('officer') ||
-    roles.includes('senior_officer')
+    permissions.includes('create_document') ||
+    permissions.includes('edit_document') ||
+    permissions.includes('submit_document')
   ) {
     return true;
   }
-  if (permissions.includes('create_document')) return true;
-  // Backward compatibility for any legacy permission payloads.
   return permissions.includes('write');
 }
 

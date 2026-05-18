@@ -86,6 +86,10 @@ const routerConfig = [
         ),
       },
       {
+        path: 'intelligence',
+        element: <Navigate to="/reports" replace />,
+      },
+      {
         path: 'archive',
         element: (
           <Wrap>

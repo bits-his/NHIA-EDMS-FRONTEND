@@ -49,6 +49,24 @@ import { resolveUsername, registerUsers } from '@/utils/users';
 import { buildUserDashboardActivityFeed } from '@/utils/userActivityFeed';
 import { cn } from '@/utils/cn';
 import { executiveDrill } from '@/utils/executiveDrillDown';
+import { DashboardOversight360 } from '@/components/dashboard/DashboardOversight360';
+import { PersonalOperationalSnapshot } from '@/components/dashboard/DashboardHomeWidgets';
+import {
+  DashboardAlertsBanner,
+  DashboardExecutiveSummary,
+  DashboardPriorityInbox,
+  DashboardPeriodFilter,
+  DashboardSectionLabel,
+  DashboardStatCard,
+  scrollToDashboardSection,
+  DASHBOARD_SECTION,
+} from '@/components/dashboard/dashboardPrimitives';
+import { mapDashboardAlerts } from '@/components/dashboard/mapDashboardAlerts';
+import {
+  periodParamsFromPreset,
+  useDashboardPeriod,
+} from '@/components/dashboard/DashboardPeriodSelect';
+import { dashboardApi } from '@/api/dashboard';
 import type { Task } from '@/types/task';
 
 const DIRECTOR_DASHBOARD_VIEW_KEY = 'nhia-edms-director-dashboard-view';
@@ -106,8 +124,8 @@ function DirectorDashboardShell() {
               <span className="font-medium text-emerald-700 dark:text-emerald-400">My dashboard</span>
               {' — '}your tasks and documents you own.
               {' '}
-              <span className="font-medium text-emerald-700 dark:text-emerald-400">360 · Operations</span>
-              {' — '}organisation-wide oversight (Director / GM grades and legacy director role).
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">Organisation overview</span>
+              {' — '}organisation-wide monitoring for leadership roles.
             </p>
           </div>
         </div>
@@ -164,7 +182,7 @@ function DirectorDashboardShell() {
                 view === '360' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'
               )}
             />
-            360 · Operations
+            Organisation overview
           </button>
         </div>
       </div>
@@ -187,7 +205,7 @@ export default function DashboardPage() {
   if (operational && directorToggle) {
     return <DirectorDashboardShell />;
   }
-  if (operational) return <Operational360Dashboard />;
+  if (operational) return <DashboardOversight360 />;
   if (showOfficerHomeDashboard(roles)) return <OfficerDashboard />;
   return <UserDashboard />;
 }
@@ -229,466 +247,36 @@ function QuickAction({ icon: Icon, label, path, navigate }: {
   );
 }
 
-// ─── 360 Operations (admin / director / reviewer / manage_* — matches document & task agent visibility) ──
-function Operational360Dashboard() {
-  const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const hasPermission = useAuthStore((s) => s.hasPermission);
-  const notifications = useNotificationStore((s) => s.notifications);
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
-
-  const isAdmin = user?.roles.includes('admin') ?? false;
-  const canRecentAudit = isAdmin || hasPermission('view_audit_logs');
-  const showAuditLogPage = canAccessAuditLogModule(user?.roles);
-
-  useQuery({
-    queryKey: ['dashboard-register-users'],
-    queryFn: async () => {
-      const rows = await authApi.listUsers();
-      registerUsers(rows.map((r) => ({ id: r.id, username: r.username })));
-      return rows;
-    },
-    enabled: isAdmin,
-    staleTime: 120_000,
-  });
-
-  const { data: profile } = useQuery({
-    queryKey: QUERY_KEYS.userProfile(user?.user_id ?? ''),
-    queryFn: () => authApi.getProfile(user!.user_id),
-    enabled: !!user?.user_id,
-    staleTime: 120_000,
-  });
-
-  const { data: allDocuments, isLoading: docsLoading } = useQuery({
-    queryKey: [QUERY_KEYS.allDocuments, 'operational-360', user?.user_id ?? ''],
-    queryFn: () => documentsApi.listAll(),
-    staleTime: 30_000,
-    enabled: !!user?.user_id,
-  });
-
-  const { data: allTasksRaw, isLoading: tasksLoading } = useQuery({
-    queryKey: QUERY_KEYS.tasksOperationalAll(),
-    queryFn: () => tasksApi.listOperationalAll(),
-    staleTime: 30_000,
-    enabled: !!user?.user_id,
-  });
-
-  const { data: recentAuditFeed, isLoading: auditLoadingRecent } = useQuery({
-    queryKey: QUERY_KEYS.auditLogsRecent(60),
-    queryFn: () => auditApi.getRecentLogs(60),
-    staleTime: 15_000,
-    enabled: !!user?.user_id && canRecentAudit,
-  });
-
-  const { data: fallbackAudit, isLoading: auditLoadingFallback } = useQuery({
-    queryKey: ['audit-operational-fallback', user?.user_id ?? ''],
-    queryFn: () => auditApi.getLogs({ actor_id: user!.user_id }),
-    staleTime: 30_000,
-    enabled: !!user?.user_id && !canRecentAudit,
-  });
-
-  const auditLoading = canRecentAudit ? auditLoadingRecent : auditLoadingFallback;
-  const allAudit = canRecentAudit ? (recentAuditFeed ?? []) : (fallbackAudit ?? []);
-
-  const docs = allDocuments ?? [];
-  const tasks = allTasksRaw ?? [];
-
-  const assigneeWorkload = useMemo(() => {
-    const m = new Map<string, { total: number; active: number }>();
-    for (const t of tasks) {
-      const aid = t.assignee_id;
-      if (!aid) continue;
-      const cur = m.get(aid) ?? { total: 0, active: 0 };
-      cur.total += 1;
-      if (t.status === 'pending' || t.status === 'in_progress') cur.active += 1;
-      m.set(aid, cur);
-    }
-    return [...m.entries()].sort(
-      (a, b) => b[1].active - a[1].active || b[1].total - a[1].total
-    ).slice(0, 8);
-  }, [tasks]);
-
-  const orgHint = [profile?.zone, profile?.state, profile?.department].filter(Boolean).join(' · ');
-
-  // Document stats
-  const docsByStatus = {
-    draft:    docs.filter((d) => d.status === 'draft').length,
-    pending:  docs.filter((d) => d.status === 'pending').length,
-    approved: docs.filter((d) => d.status === 'approved').length,
-    rejected: docs.filter((d) => d.status === 'rejected').length,
-    archived: docs.filter((d) => d.status === 'archived').length,
-  };
-
-  // Task stats
-  const activeTasks    = tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress');
-  const overdueTasks   = tasks.filter((t) => isTaskOverdue(t));
-  const completedTasks = tasks.filter((t) => t.status === 'completed');
-
-  // Pending docs needing admin action
-  const pendingDocs = docs.filter((d) => d.status === 'pending');
-
-  const isLoading = docsLoading || tasksLoading;
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="360 · Operations"
-        description={`Unified view of the document lifecycle, workflow tasks, and signals you are allowed to see — aligned with NHIA EDMS visibility rules.${orgHint ? ` Your profile context: ${orgHint}.` : ''}`}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
-              <Trophy className="h-4 w-4" /> View performance
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
-              <Search className="h-4 w-4" /> Search
-            </Button>
-            <Button size="sm" onClick={() => navigate('/documents/new')}>
-              <Plus className="h-4 w-4" /> Start process
-            </Button>
-          </div>
-        }
-      />
-
-      {/* ── System health banner ── */}
-      {!isLoading && (docsByStatus.pending > 0 || overdueTasks.length > 0) && (
-        <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-900/10 p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/40 mt-0.5">
-              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Action required</p>
-              <div className="flex items-center gap-4 mt-1 flex-wrap">
-                {docsByStatus.pending > 0 && (
-                  <button
-                    onClick={() => navigate('/documents')}
-                    className="text-xs text-amber-700 dark:text-amber-400 hover:underline"
-                  >
-                    {docsByStatus.pending} document{docsByStatus.pending !== 1 ? 's' : ''} pending review
-                  </button>
-                )}
-                {overdueTasks.length > 0 && (
-                  <button
-                    onClick={() => navigate('/tasks')}
-                    className="text-xs text-amber-700 dark:text-amber-400 hover:underline"
-                  >
-                    {overdueTasks.length} overdue task{overdueTasks.length !== 1 ? 's' : ''}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Top stats ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <Skeleton className="h-10 w-10 rounded-xl" />
-              <Skeleton className="h-7 w-12" />
-              <Skeleton className="h-3 w-24" />
-            </div>
-          ))
-        ) : (
-          <>
-            <StatCard icon={FileText} label="Total Documents" value={docs.length} sub="within your visibility"
-              color="text-primary" bg="bg-primary/10" ring="ring-primary/10" onClick={() => navigate(executiveDrill.allDocuments())} />
-            <StatCard icon={Clock} label="Pending Review" value={docsByStatus.pending} sub="awaiting approval"
-              color="text-amber-600 dark:text-amber-400" bg="bg-amber-50 dark:bg-amber-900/20" ring="ring-amber-100 dark:ring-amber-900/30"
-              onClick={() => navigate(executiveDrill.documentsByStatus('pending'))} />
-            <StatCard icon={CheckSquare} label="Active Tasks" value={activeTasks.length} sub="org-wide queue"
-              color="text-blue-600 dark:text-blue-400" bg="bg-blue-50 dark:bg-blue-900/20" ring="ring-blue-100 dark:ring-blue-900/30"
-              onClick={() => navigate(executiveDrill.activeTasks())} />
-            <StatCard icon={AlertTriangle} label="Overdue Tasks" value={overdueTasks.length} sub="need attention"
-              color={overdueTasks.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}
-              bg={overdueTasks.length > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20'}
-              ring={overdueTasks.length > 0 ? 'ring-red-100 dark:ring-red-900/30' : 'ring-emerald-100 dark:ring-emerald-900/30'}
-              onClick={() => navigate(executiveDrill.overdueTasks())} />
-          </>
-        )}
-      </div>
-
-      {/* ── Document status breakdown ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4 text-primary" /> Document Pipeline
-            </CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="text-xs">
-              View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {docsLoading ? (
-              <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
-            ) : (
-              <div className="space-y-3">
-                {/* Status bars */}
-                {([
-                  { status: 'pending',  label: 'Pending Review', count: docsByStatus.pending,  color: 'bg-amber-500' },
-                  { status: 'draft',    label: 'Draft',          count: docsByStatus.draft,    color: 'bg-slate-400' },
-                  { status: 'approved', label: 'Approved',       count: docsByStatus.approved, color: 'bg-emerald-500' },
-                  { status: 'rejected', label: 'Rejected',       count: docsByStatus.rejected, color: 'bg-red-500' },
-                  { status: 'archived', label: 'Archived',       count: docsByStatus.archived, color: 'bg-slate-300' },
-                ] as const).map(({ label, count, color }) => (
-                  <div key={label} className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground w-28 shrink-0">{label}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${color}`}
-                        style={{ width: docs.length > 0 ? `${(count / docs.length) * 100}%` : '0%' }}
-                      />
-                    </div>
-                    <span className="text-xs font-semibold text-foreground w-6 text-right tabular-nums">{count}</span>
-                  </div>
-                ))}
-
-                <Separator className="my-2" />
-
-                {/* Pending documents list */}
-                {pendingDocs.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pending approval</p>
-                    {pendingDocs.slice(0, 4).map((doc) => (
-                      <div
-                        key={doc.id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20 cursor-pointer transition-colors group"
-                        onClick={() => navigate(`/documents/${doc.id}`)}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{doc.title}</p>
-                            <p className="text-xs text-muted-foreground capitalize">by {resolveUsername(doc.owner_id)}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <DocumentStatusBadge status={doc.status} statusLabel={doc.status_label} size="sm" />
-                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
-                        </div>
-                      </div>
-                    ))}
-                    {pendingDocs.length > 4 && (
-                      <button onClick={() => navigate(executiveDrill.documentsByStatus('pending'))} className="text-xs text-primary hover:underline w-full text-center pt-1">
-                        +{pendingDocs.length - 4} more pending documents
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 py-3 text-sm text-emerald-600 dark:text-emerald-400">
-                    <CheckSquare className="h-4 w-4" />
-                    All documents are up to date — no pending reviews
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Right column */}
-        <div className="space-y-5">
-          {/* Assignee workload (derived from live task queue) */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" /> Assignee workload
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {assigneeWorkload.length === 0 ? (
-                <p className="text-xs text-muted-foreground py-2">No assignee data yet — tasks will appear as workflows run.</p>
-              ) : (
-                assigneeWorkload.map(([uid, { active: activeCnt, total }]) => {
-                  const name = resolveUsername(uid);
-                  return (
-                    <div key={uid} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold uppercase">
-                          {name.slice(0, 2)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium capitalize truncate">{name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {activeCnt} active · {total} total
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => navigate('/tasks')}
-                        className="text-xs text-primary hover:underline shrink-0"
-                      >
-                        Tasks
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Quick actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Shortcuts</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1">
-              <QuickAction icon={Plus}      label="Create Document"  path="/documents/new" navigate={navigate} />
-              <QuickAction icon={FileText}  label="All Documents"    path="/documents"     navigate={navigate} />
-              {canAccessTemplateManagement(user?.roles ?? []) && (
-                <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
-              )}
-              {showAuditLogPage && (
-                <QuickAction icon={Shield}    label="Audit Log"        path="/audit"         navigate={navigate} />
-              )}
-              <QuickAction icon={Search}    label="Search & OCR"     path="/search"        navigate={navigate} />
-              {isAdmin && (
-                <QuickAction icon={Users} label="User management" path="/admin/users" navigate={navigate} />
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* ── Tasks overview ── */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <CheckSquare className="h-4 w-4 text-primary" /> Active tasks (org-wide)
-            {activeTasks.length > 0 && (
-              <Badge variant="info" className="ml-1">{activeTasks.length}</Badge>
-            )}
-          </CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="text-xs">
-            View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {tasksLoading ? (
-            <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
-          ) : activeTasks.length === 0 ? (
-            <div className="flex items-center gap-2 py-6 justify-center text-sm text-emerald-600 dark:text-emerald-400">
-              <CheckSquare className="h-4 w-4" /> No active tasks — all clear
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {activeTasks.slice(0, 6).map((task) => {
-                const overdue = isTaskOverdue(task);
-                return (
-                  <div
-                    key={task.id}
-                    className={cn(
-                      'flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all group hover:shadow-sm',
-                      overdue ? 'border-red-200 dark:border-red-900/50 bg-red-50/30 dark:bg-red-900/5' : 'border-border hover:border-primary/25'
-                    )}
-                    onClick={() => navigate(`/tasks/${task.id}`)}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', overdue ? 'bg-red-100 dark:bg-red-900/20' : 'bg-primary/8')}>
-                        {overdue
-                          ? <AlertTriangle className="h-4 w-4 text-red-500" />
-                          : <CheckSquare className="h-4 w-4 text-primary" />
-                        }
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">
-                          Step {task.step_number} — Review Task
-                        </p>
-                        <p className="text-xs text-muted-foreground capitalize">
-                          Assigned to {resolveUsername(task.assignee_id)}
-                          {task.due_date && <span className={cn('ml-2', overdue && 'text-red-500 font-medium')}>· {formatRelative(task.due_date)}</span>}
-                        </p>
-                      </div>
-                    </div>
-                    <TaskStatusBadge status={task.status} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── System-wide audit feed ── */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            {canRecentAudit ? 'System activity' : 'Your recent audit'}
-          </CardTitle>
-          {showAuditLogPage && (
-            <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
-              Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          <AuditTimeline logs={(allAudit ?? []).slice(0, 8)} loading={auditLoading} compact />
-        </CardContent>
-      </Card>
-
-      {/* ── Notifications ── */}
-      {unreadCount > 0 && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Bell className="h-4 w-4 text-primary" />
-              Unread Notifications
-              <Badge variant="default">{unreadCount}</Badge>
-            </CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/notifications')} className="text-xs">
-              View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {notifications.filter((n) => !n.read).slice(0, 3).map((n) => (
-                <div key={n.id} className="p-3 rounded-lg bg-background border border-primary/15 text-xs">
-                  <p className="font-medium text-foreground line-clamp-2">{n.message}</p>
-                  <p className="text-muted-foreground mt-1">{formatRelative(n.created_at)}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── Executive 360 (Director / Director General) ─────────────────────────────
-type ExecutiveVariant = 'director' | 'dgo';
+type ExecutiveVariant = 'dgo' | 'director';
 
 function HealthMetricRow({
   label,
   value,
-  onClick,
-  valueClassName,
   suffix,
+  valueClassName,
+  onClick,
 }: {
   label: string;
   value: number;
-  onClick: () => void;
-  valueClassName?: string;
   suffix?: string;
+  valueClassName?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={value === 0 && !suffix}
-      className={cn(
-        'w-full text-left text-sm py-0.5 rounded hover:text-primary transition-colors',
-        value > 0 && 'cursor-pointer'
-      )}
-    >
-      <span className="text-muted-foreground">{label}:</span>{' '}
-      <span className={cn('font-semibold', valueClassName)}>{value}</span>
-      {suffix && <span className="text-muted-foreground">{suffix}</span>}
+  const body = (
+    <div className="flex justify-between py-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('font-semibold tabular-nums', valueClassName)}>
+        {value}
+        {suffix}
+      </span>
+    </div>
+  );
+  return onClick ? (
+    <button type="button" onClick={onClick} className="w-full text-left hover:opacity-90">
+      {body}
     </button>
+  ) : (
+    body
   );
 }
 
@@ -697,19 +285,21 @@ function OrgMetricBars({
   empty,
   onRowClick,
 }: {
-  rows: Array<{ id?: number | null; name: string; documents: number; pending: number }>;
+  rows: Array<{ id: number | null; name: string; documents: number; pending: number }>;
   empty: string;
-  onRowClick?: (row: { id?: number | null; name: string; documents: number; pending: number }) => void;
+  onRowClick?: (row: { id: number | null; name: string; documents: number; pending: number }) => void;
 }) {
-  if (!rows.length) return <p className="text-xs text-muted-foreground py-2">{empty}</p>;
+  if (!rows.length) {
+    return <p className="text-xs text-muted-foreground py-4 text-center">{empty}</p>;
+  }
   const max = Math.max(...rows.map((r) => r.documents), 1);
   return (
     <div className="space-y-3">
       {rows.map((row) => {
-        const interactive = Boolean(onRowClick && row.documents > 0);
+        const interactive = !!onRowClick && row.documents > 0;
         return (
           <div
-            key={row.name}
+            key={`${row.id}-${row.name}`}
             role={interactive ? 'button' : undefined}
             tabIndex={interactive ? 0 : undefined}
             onClick={interactive ? () => onRowClick!(row) : undefined}
@@ -758,10 +348,11 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
   const isAdmin = user?.roles.includes('admin') ?? false;
   const canRecentAudit = isAdmin || hasPermission('view_audit_logs');
   const showAuditLogPage = canAccessAuditLogModule(user?.roles);
+  const { preset, setPreset, params } = useDashboardPeriod('30');
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: QUERY_KEYS.executive360(variant),
-    queryFn: () => executiveApi.get360(),
+    queryKey: QUERY_KEYS.executive360(variant, params),
+    queryFn: () => executiveApi.get360(params),
     staleTime: 30_000,
     enabled: !!user?.user_id,
   });
@@ -808,97 +399,68 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
       : [];
 
   const kpis = data?.kpis;
+  const mappedAlerts = data?.alerts ? mapDashboardAlerts(data.alerts) : [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        title="360 · Executive intelligence"
-        description="Live metrics from documents, workflows, tasks, and audit activity — scoped to your authority."
+        title={variant === 'dgo' ? 'National overview' : 'Directorate overview'}
+        description="Prioritised view of approvals, delays, and organisational activity within your authority."
         actions={
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate('/tasks')}>
-              <CheckSquare className="h-4 w-4" /> Tasks
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
+              Reports
             </Button>
-            <Button size="sm" onClick={() => navigate('/documents')}>
-              <FileText className="h-4 w-4" /> Documents
+            <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
+              My performance
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/documents')}>
+              Documents
             </Button>
           </div>
         }
       />
 
       {isError && (
-        <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/80 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-300">
-          Unable to load executive analytics. Showing standard operational view below.
+        <div className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50/80 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-300">
+          Unable to load organisation metrics. Please refresh the page.
         </div>
       )}
 
-      {!isLoading && data?.alerts && data.alerts.length > 0 && (
-        <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-900/10 p-4">
-          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4" /> Executive monitoring — action required
-          </p>
-          <div className="flex flex-wrap gap-3 mt-2">
-            {data.alerts.map((a) => {
-              const drill =
-                a.type === 'pending_approvals'
-                  ? executiveDrill.documentsByStatus('pending')
-                  : a.type === 'overdue_tasks'
-                    ? executiveDrill.overdueTasks()
-                    : a.type === 'stalled_workflows'
-                      ? executiveDrill.stalledWorkflows()
-                      : a.type === 'reporting_pending'
-                        ? executiveDrill.reportingPending()
-                        : a.link;
-              return (
-                <button
-                  key={a.type}
-                  type="button"
-                  onClick={() => navigate(drill)}
-                  className="text-xs text-amber-800 dark:text-amber-300 hover:underline"
-                >
-                  {a.message}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {!isLoading && mappedAlerts.length > 0 ? (
+        <DashboardAlertsBanner alerts={mappedAlerts} onNavigate={navigate} />
+      ) : null}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <DashboardSectionLabel
+        action={<DashboardPeriodFilter value={preset} onChange={setPreset} />}
+      >
+        Current status (live)
+      </DashboardSectionLabel>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <Skeleton className="h-10 w-10 rounded-xl" />
+            <div key={i} className="rounded-xl border bg-card p-4 space-y-3">
+              <Skeleton className="h-9 w-9 rounded-lg" />
               <Skeleton className="h-7 w-12" />
             </div>
           ))
         ) : (
           <>
-            <StatCard
+            <DashboardStatCard
               icon={FileText}
-              label="Documents"
-              value={kpis?.documents.total ?? 0}
-              sub={`${kpis?.documents.pending ?? 0} pending review`}
-              color="text-primary"
-              bg="bg-primary/10"
-              ring="ring-primary/10"
-              onClick={() => navigate(executiveDrill.allDocuments())}
+              label="Awaiting approval"
+              value={kpis?.documents.pending ?? 0}
+              sub={`of ${kpis?.documents.total ?? 0} documents in scope`}
+              color="text-amber-600 dark:text-amber-400"
+              bg="bg-amber-50 dark:bg-amber-900/20"
+              ring="ring-amber-100 dark:ring-amber-900/30"
+              onClick={() => scrollToDashboardSection(DASHBOARD_SECTION.pendingApproval)}
             />
-            <StatCard
-              icon={CheckSquare}
-              label="Active tasks"
-              value={kpis?.tasks.active ?? 0}
-              sub="workflow queue"
-              color="text-blue-600 dark:text-blue-400"
-              bg="bg-blue-50 dark:bg-blue-900/20"
-              ring="ring-blue-100 dark:ring-blue-900/30"
-              onClick={() => navigate(executiveDrill.activeTasks())}
-            />
-            <StatCard
+            <DashboardStatCard
               icon={AlertTriangle}
-              label="Overdue"
+              label="Overdue tasks"
               value={kpis?.tasks.overdue ?? 0}
-              sub="tasks past due"
+              sub="past due date"
               color={
                 (kpis?.tasks.overdue ?? 0) > 0
                   ? 'text-red-600 dark:text-red-400'
@@ -914,22 +476,52 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
                   ? 'ring-red-100 dark:ring-red-900/30'
                   : 'ring-emerald-100 dark:ring-emerald-900/30'
               }
-              onClick={() => navigate(executiveDrill.overdueTasks())}
+              onClick={() => scrollToDashboardSection(DASHBOARD_SECTION.overdueTasks)}
             />
-            <StatCard
-              icon={Radar}
-              label="Escalation signals"
+            <DashboardStatCard
+              icon={CheckSquare}
+              label="Active workflow tasks"
+              value={kpis?.tasks.active ?? 0}
+              sub="pending or in progress"
+              color="text-blue-600 dark:text-blue-400"
+              bg="bg-blue-50 dark:bg-blue-900/20"
+              ring="ring-blue-100 dark:ring-blue-900/30"
+              onClick={() => navigate(executiveDrill.activeTasks())}
+            />
+            <DashboardStatCard
+              icon={Activity}
+              label="Workflow delays"
               value={data?.workflowHealth.escalationSignals ?? 0}
-              sub={`${kpis?.workflows.stalled ?? 0} stalled workflows`}
+              sub={`${kpis?.workflows.stalled ?? 0} stalled 7+ days`}
               color="text-primary"
               bg="bg-primary/10"
               ring="ring-primary/20"
-              onClick={() => navigate(executiveDrill.escalation())}
+              onClick={() => navigate('/reports?tab=escalations')}
             />
           </>
         )}
       </div>
 
+      {!isLoading && kpis ? (
+        <DashboardExecutiveSummary
+          kpis={kpis}
+          periodActivity={kpis.periodActivity}
+          periodComparison={data?.periodComparison}
+          onOpenReports={(tab) => navigate(tab ? `/reports?tab=${tab}` : '/reports')}
+        />
+      ) : null}
+
+      <DashboardSectionLabel>Analysis</DashboardSectionLabel>
+      <DashboardPriorityInbox
+        pendingDocs={data?.topPending ?? []}
+        overdueTasks={data?.topOverdueTasks ?? []}
+        overdueTotal={kpis?.tasks.overdue}
+        isLoading={isLoading}
+        onOpenDocument={(id) => navigate(`/documents/${id}`)}
+        onOpenTask={(id) => navigate(`/tasks/${id}`)}
+        onViewAllPending={() => navigate(executiveDrill.documentsByStatus('pending'))}
+        onViewAllOverdue={() => navigate(executiveDrill.overdueTasks())}
+      />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
@@ -1050,7 +642,7 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-primary" />
-              {variant === 'dgo' ? 'State office activity' : 'Audit activity (7 days)'}
+              {variant === 'dgo' ? 'State office activity' : 'Audit activity (period)'}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1077,7 +669,7 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
               </ResponsiveContainer>
               </button>
             ) : (
-              <p className="text-xs text-muted-foreground">No audit events in the last 7 days.</p>
+              <p className="text-xs text-muted-foreground">No audit events in the selected period.</p>
             )}
           </CardContent>
         </Card>
@@ -1086,7 +678,7 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
       {variant === 'dgo' && trendChart.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">National activity trend (7 days)</CardTitle>
+            <CardTitle className="text-base">National activity trend (selected period)</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
@@ -1102,47 +694,7 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Pending approvals</CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs"
-              onClick={() => navigate(executiveDrill.documentsByStatus('pending'))}
-            >
-              View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {(data?.topPending ?? []).length === 0 ? (
-              <p className="text-sm text-emerald-600 dark:text-emerald-400 py-4 text-center">
-                No pending documents in scope
-              </p>
-            ) : (
-              data!.topPending.map((doc) => (
-                <div
-                  key={doc.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/documents/${doc.id}`)}
-                  onKeyDown={(e) => e.key === 'Enter' && navigate(`/documents/${doc.id}`)}
-                  className="flex items-center justify-between p-3 rounded-lg border border-amber-200/60 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-900/10 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.title}</p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {resolveUsername(doc.owner_id)} · {formatRelative(doc.updated_at)}
-                    </p>
-                  </div>
-                  <DocumentStatusBadge status="pending" statusLabel={doc.status_label} size="sm" />
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base flex items-center gap-2">
@@ -1219,6 +771,12 @@ function OfficerDashboard() {
     enabled: !!user?.user_id,
   });
 
+  const { data: myTasks, isLoading: tasksLoading } = useQuery({
+    queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
+    queryFn: () => tasksApi.list(user!.user_id),
+    enabled: !!user?.user_id,
+  });
+
   const { data: myDocuments, isLoading: myDocsLoading } = useQuery({
     queryKey: [QUERY_KEYS.allDocuments, user?.user_id ?? 'anon'],
     queryFn: () => documentsApi.listAll(),
@@ -1226,7 +784,16 @@ function OfficerDashboard() {
     staleTime: 30_000,
   });
 
+  const homePeriod = useMemo(() => periodParamsFromPreset('30'), []);
+  const { data: home, isLoading: homeLoading } = useQuery({
+    queryKey: QUERY_KEYS.dashboardHome(homePeriod),
+    queryFn: () => dashboardApi.getHome(homePeriod),
+    enabled: !!user?.user_id,
+    staleTime: 45_000,
+  });
+
   const docs = myDocuments ?? [];
+  const tasks = myTasks ?? [];
 
   const activityFeed = useMemo(
     () =>
@@ -1235,15 +802,16 @@ function OfficerDashboard() {
             userId: user.user_id,
             auditLogs: recentAudit ?? [],
             myDocuments: docs,
-            myTasks: [],
+            myTasks: tasks,
             limit: 48,
             viewerDisplay: { username: user.username, full_name: null },
           })
         : [],
-    [user?.user_id, user?.username, recentAudit, docs]
+    [user?.user_id, user?.username, recentAudit, docs, tasks]
   );
 
   const totalCreated = docs.length;
+  const overdueTaskCount = tasks.filter((t) => isTaskOverdue(t)).length;
   const approvedCount = docs.filter((d) => d.status === 'approved' || d.status === 'archived').length;
   const rejectedCount = docs.filter((d) => d.status === 'rejected').length;
   const pendingCount = docs.filter((d) => d.status === 'pending').length;
@@ -1291,20 +859,23 @@ function OfficerDashboard() {
     },
   ];
 
-  const loading = auditLoading || myDocsLoading;
+  const loading = auditLoading || myDocsLoading || tasksLoading;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Officer dashboard"
-        description={`Welcome back, ${user?.username ?? 'there'}. Your memos and system activity — submissions and workflow steps are tracked on each document.`}
+        title="My workspace"
+        description={`Welcome back, ${user?.username ?? 'there'}. Your documents, tasks, and activity in one place.`}
         actions={
           <div className="flex items-center gap-2">
             {showPersonalPerformance && (
               <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-                <Trophy className="h-4 w-4" /> View performance
+                <Activity className="h-4 w-4" /> My performance
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
+              <BarChart3 className="h-4 w-4" /> Reports
+            </Button>
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>
@@ -1328,6 +899,20 @@ function OfficerDashboard() {
             ))
           : stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
+
+      {overdueTaskCount > 0 ? (
+        <div className="rounded-lg border border-red-200/80 bg-red-50/50 dark:bg-red-950/20 px-4 py-2 text-sm text-red-800 dark:text-red-300">
+          {overdueTaskCount} overdue task{overdueTaskCount !== 1 ? 's' : ''} —{' '}
+          <button type="button" className="underline font-medium" onClick={() => navigate('/tasks')}>
+            open tasks
+          </button>
+        </div>
+      ) : null}
+
+      <PersonalOperationalSnapshot
+        data={home?.personalOperational}
+        isLoading={homeLoading}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
@@ -1471,6 +1056,14 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
     staleTime: 30_000,
   });
 
+  const homePeriod = useMemo(() => periodParamsFromPreset('30'), []);
+  const { data: home, isLoading: homeLoading } = useQuery({
+    queryKey: QUERY_KEYS.dashboardHome(homePeriod),
+    queryFn: () => dashboardApi.getHome(homePeriod),
+    enabled: !!user?.user_id,
+    staleTime: 45_000,
+  });
+
   const roles = user?.roles ?? [];
   const permissions = user?.permissions ?? [];
   const showTeamPerformance = canAccessPerformanceTracking(roles, permissions);
@@ -1532,9 +1125,12 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
           <div className="flex items-center gap-2">
             {showPersonalPerformance && (
               <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-                <Trophy className="h-4 w-4" /> View performance
+                <Activity className="h-4 w-4" /> My performance
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
+              <BarChart3 className="h-4 w-4" /> Reports
+            </Button>
             {showTeamPerformance && !showPersonalPerformance && (
               <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
                 <Trophy className="h-4 w-4" /> View performance
@@ -1564,6 +1160,11 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
           : stats.map((s) => <StatCard key={s.label} {...s} />)
         }
       </div>
+
+      <PersonalOperationalSnapshot
+        data={home?.personalOperational}
+        isLoading={homeLoading}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">

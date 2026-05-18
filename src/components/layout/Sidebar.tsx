@@ -15,6 +15,7 @@ import {
   Trophy,
   Archive,
   FileBarChart,
+  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
@@ -183,7 +184,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {recordsNavItems
             .filter((item) => !(juniorOnly && !item.juniorVisible))
             .map(({ to, icon: Icon, label }) => {
-              const isActive = location.pathname === to;
+              const isActive =
+                location.pathname === to ||
+                (to === '/reports' && location.pathname.startsWith('/reports'));
               const linkContent = (
                 <NavLink
                   to={to}
@@ -211,7 +214,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             })}
         </>
 
-        {/* ── Performance tracking (director / DGO / oversight) ── */}
         {showPerformanceNav && (
           <>
             {!collapsed && (
@@ -222,6 +224,36 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               </div>
             )}
             {collapsed && <div className="my-1 mx-2 h-px bg-sidebar-border" />}
+            {(() => {
+              const to = '/operational';
+              const Icon = Gauge;
+              const label = 'My performance';
+              const isActive = location.pathname.startsWith('/operational');
+              const linkContent = (
+                <NavLink
+                  to={to}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                    collapsed ? 'justify-center px-0 w-10 mx-auto' : '',
+                    isActive
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
+                  )}
+                >
+                  <Icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </NavLink>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={to} delayDuration={0}>
+                    <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+                    <TooltipContent side="right">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              }
+              return <div key={to}>{linkContent}</div>;
+            })()}
             {(() => {
               const to = '/performance';
               const Icon = Trophy;

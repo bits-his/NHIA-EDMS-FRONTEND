@@ -35,7 +35,15 @@ function useReportQueryParams(): Record<string, string> {
   }, [searchParams]);
 }
 
-export default function ExecutiveReportPage() {
+type ExecutiveReportPageProps = {
+  backHref?: string;
+  backLabel?: string;
+};
+
+export default function ExecutiveReportPage({
+  backHref = '/dashboard',
+  backLabel = 'Back to dashboard',
+}: ExecutiveReportPageProps = {}) {
   const navigate = useNavigate();
   const params = useReportQueryParams();
 
@@ -53,10 +61,10 @@ export default function ExecutiveReportPage() {
         variant="ghost"
         size="sm"
         className="-ml-2 gap-2 text-muted-foreground hover:text-foreground"
-        onClick={() => navigate('/dashboard')}
+        onClick={() => navigate(backHref)}
       >
         <ArrowLeft className="h-4 w-4" />
-        Back to dashboard
+        {backLabel}
       </Button>
 
       <PageHeader

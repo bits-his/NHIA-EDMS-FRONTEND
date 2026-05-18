@@ -13,6 +13,16 @@ export interface Executive360Response {
     label: string;
     view: ExecutiveViewType;
   };
+  period?: { from: string; to: string };
+  periodComparison?: {
+    previousPeriod: { from: string; to: string };
+    deltas: {
+      auditEvents: { percent: number; direction: 'up' | 'down' | 'flat' };
+      documentsCreated: { percent: number; direction: 'up' | 'down' | 'flat' };
+      tasksCompleted: { percent: number; direction: 'up' | 'down' | 'flat' };
+      reportingSubmissions: { percent: number; direction: 'up' | 'down' | 'flat' };
+    };
+  };
   generatedAt: string;
   kpis: {
     documents: {
@@ -37,8 +47,23 @@ export interface Executive360Response {
       total: number;
       pending: number;
     };
+    correspondence: {
+      incoming: number;
+      outgoing: number;
+      total: number;
+      pending: number;
+    };
     audit: {
-      eventsLast7Days: number;
+      eventsInPeriod: number;
+      /** @deprecated use eventsInPeriod */
+      eventsLast7Days?: number;
+    };
+    periodActivity?: {
+      auditEvents: number;
+      documentsCreated: number;
+      tasksCompleted: number;
+      reportingSubmissions: number;
+      revisionLoops: number;
     };
   };
   pipeline: Array<{ status: string; label: string; count: number }>;
@@ -73,7 +98,8 @@ export interface Executive360Response {
     step_number: number;
     assignee_id: string;
     document_id: string;
-    due_date: string;
+    due_date: string | null;
+    created_at?: string | null;
   }>;
   assigneeWorkload: Array<{ user_id: string; active: number; total: number }>;
 }

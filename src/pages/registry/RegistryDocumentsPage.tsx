@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import ExecutiveReportPage from '@/pages/dashboard/ExecutiveReportPage';
 import { Archive, FileBarChart, Search, X } from 'lucide-react';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -21,6 +22,7 @@ import type { Document, DocumentStatus } from '@/types/document';
 import type { RegistrySearchFilters } from '@/types/registry';
 import { canViewOperationalOverview } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
+import { OperationalReportingHubPanel } from '@/components/reporting/OperationalReportingHubPanel';
 
 export type RegistryMode = 'archive' | 'reports';
 
@@ -39,9 +41,11 @@ function categoryLabel(category: string | null | undefined): string {
 
 type RegistryDocumentsPageProps = {
   mode: RegistryMode;
+  /** When true, omit page title (used inside Reports tabbed layout). */
+  embedded?: boolean;
 };
 
-export function RegistryDocumentsPage({ mode }: RegistryDocumentsPageProps) {
+export function RegistryDocumentsPage({ mode, embedded = false }: RegistryDocumentsPageProps) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const [search, setSearch] = useState('');
@@ -104,8 +108,8 @@ export function RegistryDocumentsPage({ mode }: RegistryDocumentsPageProps) {
   const hasFilters = Boolean(search.trim() || dateFrom || dateTo);
 
   return (
-    <div className="space-y-6 max-w-[1400px]">
-      <PageHeader title={title} description={description} />
+    <div className={embedded ? 'space-y-6' : 'space-y-6 max-w-[1400px]'}>
+      {!embedded && <PageHeader title={title} description={description} />}
 
       {data?.label && (
         <div className="flex flex-wrap items-center gap-2">
@@ -297,5 +301,25 @@ export default function ArchivePage() {
 }
 
 export function ReportsPage() {
-  return <RegistryDocumentsPage mode="reports" />;
+  const [searchParams] = useSearchParams();
+  const user = useAuthStore((s) => s.user);
+  const orgWide = canViewOperationalOverview(user?.roles ?? [], user?.permissions ?? []);
+
+  if (searchParams.get('kind')) {
+    return <ExecutiveReportPage backHref="/reports" backLabel="Back to reports" />;
+  }
+
+  return (
+    <div className="space-y-4 max-w-[1600px]">
+      <PageHeader
+        title="Reports"
+        description={
+          orgWide
+            ? 'Operational intelligence and analytics for your scope.'
+            : 'Your workflow and reporting insights for the selected period.'
+        }
+      />
+      <OperationalReportingHubPanel />
+    </div>
+  );
 }

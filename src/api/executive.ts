@@ -2,9 +2,16 @@ import { documentClient } from './client';
 import type { Executive360Response, ExecutiveReportResponse } from '@/types/executive';
 import type { PerformanceAnalyticsResponse } from '@/types/performance';
 
+export type ExecutivePeriodParams = {
+  from: string;
+  to: string;
+};
+
 export const executiveApi = {
-  get360: async (): Promise<Executive360Response> => {
-    const res = await documentClient.get<Executive360Response>('/documents/executive/360');
+  get360: async (params?: ExecutivePeriodParams): Promise<Executive360Response> => {
+    const res = await documentClient.get<Executive360Response>('/documents/executive/360', {
+      params,
+    });
     return res.data;
   },
 

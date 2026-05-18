@@ -70,7 +70,9 @@ export const QUERY_KEYS = {
   tasks: (assigneeId: string) => ['tasks', assigneeId],
   /** All workflow tasks (requires director/reviewer/admin on task agent). */
   tasksOperationalAll: () => ['tasks', 'operational', 'all'] as const,
-  executive360: (variant: string) => ['executive', '360', variant] as const,
+  executive360: (variant: string, params?: Record<string, string>) =>
+    ['executive', '360', variant, params ?? {}] as const,
+  dashboardHome: (params?: Record<string, string>) => ['dashboard', 'home', params ?? {}] as const,
   executiveReport: (params: Record<string, string>) => ['executive', 'report', params] as const,
   executivePerformance: (params: Record<string, string>) =>
     ['executive', 'performance', params] as const,
@@ -80,6 +82,7 @@ export const QUERY_KEYS = {
     ['operational', 'team', params] as const,
   archiveRegistry: (params: Record<string, string>) => ['registry', 'archive', params] as const,
   reportsRegistry: (params: Record<string, string>) => ['registry', 'reports', params] as const,
+  reportingHub: (params: Record<string, string>) => ['reporting', 'hub', params] as const,
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
   auditLogsMyTrail: (userId: string, limit: number) => ['audit-logs', 'my-trail', userId, limit] as const,
