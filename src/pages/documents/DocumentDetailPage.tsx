@@ -536,78 +536,7 @@ export default function DocumentDetailPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-start gap-3 min-w-0">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 mt-0.5">
-            <FileText className="h-5 w-5 text-primary" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {documentTypeHeadline(doc)}
-            </p>
-            <h1
-              className="text-xl font-bold tracking-tight text-foreground leading-tight mt-0.5"
-              title={doc.title || undefined}
-            >
-              {doc.title?.trim() || 'Untitled document'}
-            </h1>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <DocumentStatusBadge
-                status={doc.status}
-                pendingStageLabel={pendingStageLabel}
-                statusLabel={doc.status_label}
-                overdue={assignmentOverdue}
-              />
-              {doc.category && (
-                <Badge variant="secondary" className="text-xs font-normal">
-                  <Tag className="h-3 w-3 mr-1" />
-                  {categoryLabel}
-                </Badge>
-              )}
-              {doc.tracking_id?.trim() && (
-                <Badge variant="outline" className="text-xs font-mono font-normal">
-                  Tracking: {doc.tracking_id.trim()}
-                </Badge>
-              )}
-              {doc.correspondence_direction && (
-                <Badge variant="outline" className="text-xs font-normal">
-                  {correspondenceLabel}
-                </Badge>
-              )}
-              {doc.ref_number && (
-                <Badge variant="outline" className="text-xs font-mono font-normal">
-                  {doc.ref_number}
-                </Badge>
-              )}
-              {doc.urgency && doc.urgency !== 'normal' && (
-                <Badge variant="outline" className="text-xs capitalize">
-                  <Zap className="h-3 w-3 mr-1" />
-                  {doc.urgency.replace('_', ' ')}
-                </Badge>
-              )}
-              {doc.delivery_mode && (
-                <Badge variant="outline" className="text-xs">
-                  {DELIVERY_LABEL[doc.delivery_mode] ?? doc.delivery_mode}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-3 mt-2 flex-wrap text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" /> {formatRelative(doc.updated_at)}
-              </span>
-              <span className="flex items-center gap-1">
-                <User className="h-3 w-3" />
-                <span className="capitalize">{ownerName}</span>
-              </span>
-              {doc.department && (
-                <span className="flex items-center gap-1">
-                  <Building2 className="h-3 w-3" />
-                  {doc.department}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+      <div className="flex items-start justify-between gap-4 flex-wrap">       
         <DocumentDetailToolbar
           onBack={() => navigate('/documents')}
           onOpenProfile={() => setProfileOpen(true)}
