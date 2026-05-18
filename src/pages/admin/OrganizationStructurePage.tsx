@@ -92,10 +92,20 @@ export default function OrganizationStructurePage() {
                   <ul className="mt-2 space-y-2">
                     {((dir.departments as Array<Record<string, unknown>> | undefined) ?? []).map((dep) => (
                       <li key={Number(dep.id)} className="rounded-md bg-muted/40 px-2 py-1.5">
-                        <span className="font-medium">{String(dep.name ?? '')}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{String(dep.name ?? '')}</span>
+                          {dep.is_active === false && (
+                            <Badge variant="secondary" className="text-[10px]">Legacy</Badge>
+                          )}
+                        </div>
                         <ul className="mt-1 ml-3 list-disc text-xs text-muted-foreground">
                           {((dep.units as Array<Record<string, unknown>> | undefined) ?? []).map((u) => (
-                            <li key={Number(u.id)}>{String(u.name ?? '')}</li>
+                            <li key={Number(u.id)} className="flex items-center gap-1">
+                              {String(u.name ?? '')}
+                              {u.is_active === false && (
+                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground/80">(legacy)</span>
+                              )}
+                            </li>
                           ))}
                         </ul>
                       </li>
@@ -106,8 +116,13 @@ export default function OrganizationStructurePage() {
               {(data.departmentsWithoutDirectorate ?? []).length > 0 && (
                 <div className="rounded-xl border border-dashed border-border p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Departments without directorate</p>
-                  {(data.departmentsWithoutDirectorate as Array<{ id: number; name: string }>).map((d) => (
-                    <p key={d.id} className="text-sm">{d.name}</p>
+                  {(data.departmentsWithoutDirectorate as Array<{ id: number; name: string; is_active?: boolean }>).map((d) => (
+                    <p key={d.id} className="text-sm flex items-center gap-2">
+                      {d.name}
+                      {d.is_active === false && (
+                        <Badge variant="secondary" className="text-[10px]">Legacy</Badge>
+                      )}
+                    </p>
                   ))}
                 </div>
               )}

@@ -81,6 +81,7 @@ export const authApi = {
     phone?: string;
     rank?: string;
     department?: string;
+    unit?: string;
     zone?: string;
     state?: string;
   }): Promise<UserRecord> => {

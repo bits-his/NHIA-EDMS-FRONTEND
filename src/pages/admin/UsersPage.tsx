@@ -38,6 +38,7 @@ import { formatDateTime } from '@/utils/formatters';
 import { getErrorMessage } from '@/api/client';
 import type { Role } from '@/types/auth';
 import type { UserRecord } from '@/api/auth';
+import type { OrgScopeReferenceResponse } from '@/types/orgScope';
 import { useAuthStore } from '@/stores/authStore';
 
 const ROLE_COLORS: Record<string, string> = {
@@ -121,6 +122,7 @@ const createUserSchema = z.object({
   phone:      z.string().max(50),
   rank:       z.string().max(100),
   department: z.string().max(255),
+  unit:       z.string().max(255),
   zone:       z.string().max(100),
   state:      z.string().max(100),
   password:   z.string().min(6, 'At least 6 characters'),
@@ -132,6 +134,7 @@ const editProfileSchema = z.object({
   phone:      z.string().max(50),
   rank:       z.string().max(100),
   department: z.string().max(255),
+  unit:       z.string().max(255),
   zone:       z.string().max(100),
   state:      z.string().max(100),
 });
@@ -166,6 +169,16 @@ const NHIA_RANK_FALLBACK_OPTIONS = [
 
 const SELECT_NONE = '__none__';
 
+function unitsForDepartment(
+  orgScope: OrgScopeReferenceResponse | undefined,
+  departmentName: string | undefined
+) {
+  if (!orgScope?.units?.length || !departmentName?.trim()) return [];
+  const dept = orgScope.departments?.find((d) => d.name === departmentName);
+  if (!dept) return [];
+  return orgScope.units.filter((u) => u.departmentId === dept.id);
+}
+
 function displayOrDash(value: string | number | boolean | null | undefined): string {
   if (value === true) return 'Yes';
   if (value === false) return 'No';
@@ -191,7 +204,7 @@ function UserRolesBadges({ u, allRoles }: { u: UserRecord; allRoles: Role[] | un
     return <span className="text-muted-foreground">—</span>;
   }
   return (
-    <div className="flex flex-wrap gap-1 min-w-[10rem] max-w-[14rem]">
+    <div className="flex flex-wrap gap-0.5 min-w-0 max-w-full">
       {u.roles.map((r) => {
         const def = allRoles?.find((x) => x.id === r.id);
         const label = roleDisplayLabel(def ?? r);
@@ -212,8 +225,8 @@ function UserRolesBadges({ u, allRoles }: { u: UserRecord; allRoles: Role[] | un
 }
 
 const TH =
-  'text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap';
-const TD = 'px-4 py-3 align-top text-sm';
+  'text-left px-3 py-2.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap';
+const TD = 'px-3 py-2.5 align-top text-xs overflow-hidden';
 
 function accountStatusBadge(status: string | null | undefined) {
   const s = (status ?? 'unknown').toLowerCase();
@@ -233,6 +246,30 @@ function accountStatusBadge(status: string | null | undefined) {
 function organisationSummary(u: UserRecord): string {
   const parts = [u.department, u.unit, u.zone, u.state].map((p) => p?.trim()).filter(Boolean);
   return parts.length ? parts.join(' · ') : '—';
+}
+
+function organisationCellLines(u: UserRecord): { primary: string; secondary: string | null } {
+  const primary = [u.department, u.unit].map((p) => p?.trim()).filter(Boolean).join(' · ');
+  const secondary = [u.zone, u.state].map((p) => p?.trim()).filter(Boolean).join(' · ');
+  return {
+    primary: primary || '—',
+    secondary: secondary || null,
+  };
+}
+
+function isActiveUser(u: UserRecord): boolean {
+  return (u.account_status ?? 'active').toLowerCase() === 'active';
+}
+
+function sortUsersActiveFirst(list: UserRecord[]): UserRecord[] {
+  return [...list].sort((a, b) => {
+    const aActive = isActiveUser(a);
+    const bActive = isActiveUser(b);
+    if (aActive !== bActive) return aActive ? -1 : 1;
+    const aName = (a.full_name || a.username || '').toLowerCase();
+    const bName = (b.full_name || b.username || '').toLowerCase();
+    return aName.localeCompare(bName);
+  });
 }
 
 function DetailRow({
@@ -368,21 +405,35 @@ function UsersTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[68rem] table-fixed text-sm">
+        <colgroup>
+          <col style={{ width: '9rem' }} />
+          <col style={{ width: '9.5rem' }} />
+          <col style={{ width: '8.5rem' }} />
+          <col style={{ width: '13rem' }} />
+          <col style={{ width: '6.5rem' }} />
+          <col style={{ width: '7.5rem' }} />
+          <col style={{ width: '4.5rem' }} />
+          <col style={{ width: '8rem' }} />
+        </colgroup>
         <thead>
           <tr className="border-b border-border bg-muted/30">
-            <th className={cn(TH, 'min-w-[10rem]')}>Full name</th>
+            <th className={TH}>Full name</th>
             <th className={TH}>Staff ID</th>
             <th className={TH}>Contact</th>
-            <th className={cn(TH, 'min-w-[12rem]')}>Organisation</th>
+            <th className={TH}>Organisation</th>
             <th className={TH}>Rank</th>
             <th className={TH}>Roles</th>
             <th className={TH}>Status</th>
-            <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right')}>Actions</th>
+            <th className={cn(TH, 'sticky right-0 bg-muted/30 z-10 text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]')}>
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody>
           {users.map((u, idx) => {
+            const orgLines = organisationCellLines(u);
+            const orgTitle = organisationSummary(u);
             return (
               <tr
                 key={u.id}
@@ -391,28 +442,47 @@ function UsersTable({
                   idx % 2 !== 0 && 'bg-muted/10'
                 )}
               >
-                <td className={cn(TD, 'min-w-[10rem]')}>
-                  <p className="font-medium text-foreground whitespace-normal">{displayOrDash(u.full_name)}</p>
-                  <p className="text-xs text-muted-foreground capitalize mt-0.5">@{displayOrDash(u.username)}</p>
-                </td>
-                <td className={cn(TD, 'tabular-nums')}>{displayOrDash(u.staff_id)}</td>
                 <td className={TD}>
-                  <p className="truncate" title={u.email ?? undefined}>{displayOrDash(u.email)}</p>
+                  <p className="font-medium text-foreground truncate" title={u.full_name ?? undefined}>
+                    {displayOrDash(u.full_name)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground capitalize mt-0.5 truncate" title={u.username}>
+                    @{displayOrDash(u.username)}
+                  </p>
+                </td>
+                <td className={cn(TD, 'font-mono text-[11px] leading-snug')}>
+                  <span className="block truncate" title={u.staff_id ?? undefined}>
+                    {displayOrDash(u.staff_id)}
+                  </span>
+                </td>
+                <td className={TD}>
+                  <p className="truncate text-[13px]" title={u.email ?? undefined}>{displayOrDash(u.email)}</p>
                   {u.phone?.trim() ? (
-                    <p className="text-xs text-muted-foreground truncate" title={u.phone}>{u.phone}</p>
+                    <p className="text-[11px] text-muted-foreground truncate mt-0.5" title={u.phone}>{u.phone}</p>
                   ) : null}
                 </td>
-                <td className={cn(TD, 'whitespace-normal text-muted-foreground')}>
-                  {organisationSummary(u)}
+                <td className={cn(TD, 'text-[11px] leading-snug text-muted-foreground')}>
+                  <p className="truncate font-medium text-foreground/90" title={orgTitle !== '—' ? orgTitle : undefined}>
+                    {orgLines.primary}
+                  </p>
+                  {orgLines.secondary ? (
+                    <p className="truncate mt-0.5" title={orgLines.secondary}>
+                      {orgLines.secondary}
+                    </p>
+                  ) : null}
                 </td>
-                <td className={TD}>{displayOrDash(u.rank ?? u.grade_level)}</td>
-                <td className="px-4 py-3 align-top">
+                <td className={TD}>
+                  <span className="block truncate text-[13px]" title={u.rank ?? u.grade_level ?? undefined}>
+                    {displayOrDash(u.rank ?? u.grade_level)}
+                  </span>
+                </td>
+                <td className="px-3 py-3 align-top">
                   <UserRolesBadges u={u} allRoles={allRoles} />
                 </td>
                 <td className={TD}>{accountStatusBadge(u.account_status)}</td>
                 <td
                   className={cn(
-                    'px-4 py-3 align-top sticky right-0 z-10 text-right',
+                    'px-2 py-2.5 align-top sticky right-0 z-10 text-right overflow-visible shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]',
                     idx % 2 !== 0 ? 'bg-muted/10' : 'bg-card'
                   )}
                 >
@@ -502,6 +572,11 @@ export default function UsersPage() {
 
   const gradeRoles = useMemo(() => gradeRolesSorted(allRoles), [allRoles]);
 
+  const sortedUsers = useMemo(
+    () => (users?.length ? sortUsersActiveFirst(users) : []),
+    [users]
+  );
+
   const usersById = useMemo(
     () => new Map((users ?? []).map((u) => [u.id, u])),
     [users]
@@ -590,7 +665,7 @@ export default function UsersPage() {
                 <EmptyState icon={Users} title="No users found" description="Create the first user to get started" />
               ) : (
                 <UsersTable
-                  users={users}
+                  users={sortedUsers}
                   allRoles={allRoles}
                   canManageUsers={canManageUsers}
                   canViewAuditNav={canViewAuditNav}
@@ -798,12 +873,15 @@ function CreateUserDialog({
       phone: '',
       rank: '',
       department: '',
+      unit: '',
       zone: '',
       state: '',
     },
   });
 
   const watchedZone = useWatch({ control, name: 'zone' });
+  const watchedDepartment = useWatch({ control, name: 'department' });
+  const watchedUnit = useWatch({ control, name: 'unit' });
 
   const { data: orgScope, isLoading: orgScopeLoading } = useQuery({
     queryKey: QUERY_KEYS.orgScopeReference,
@@ -811,6 +889,21 @@ function CreateUserDialog({
     enabled: open,
     staleTime: 60_000,
   });
+
+  const filteredUnits = useMemo(
+    () => unitsForDepartment(orgScope, watchedDepartment),
+    [orgScope, watchedDepartment]
+  );
+
+  const unitLegacy = useMemo(
+    () =>
+      Boolean(
+        watchedUnit?.trim() &&
+          filteredUnits.length > 0 &&
+          !filteredUnits.some((u) => u.name === watchedUnit)
+      ),
+    [watchedUnit, filteredUnits]
+  );
 
   const filteredStateOffices = useMemo(() => {
     if (!orgScope?.stateOffices?.length) return [];
@@ -833,6 +926,7 @@ function CreateUserDialog({
         phone: pick(data.phone),
         rank: pick(data.rank),
         department: pick(data.department),
+        unit: pick(data.unit),
         zone: pick(data.zone),
         state: pick(data.state),
       });
@@ -875,8 +969,7 @@ function CreateUserDialog({
               <Input id="cu-phone" type="tel" placeholder="+234 …" error={!!errors.phone} {...register('phone')} />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
                 <Label htmlFor="cu-rank">Rank</Label>
                 <Controller
                   name="rank"
@@ -913,7 +1006,8 @@ function CreateUserDialog({
                   )}
                 />
                 {errors.rank && <p className="text-xs text-destructive">{errors.rank.message}</p>}
-              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="cu-department">Department</Label>
                 <Controller
@@ -923,7 +1017,10 @@ function CreateUserDialog({
                     <Select
                       disabled={orgScopeLoading || !orgScope}
                       value={field.value ? field.value : SELECT_NONE}
-                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                      onValueChange={(v) => {
+                        field.onChange(v === SELECT_NONE ? '' : v);
+                        setValue('unit', '');
+                      }}
                     >
                       <SelectTrigger
                         id="cu-department"
@@ -943,6 +1040,47 @@ function CreateUserDialog({
                   )}
                 />
                 {errors.department && <p className="text-xs text-destructive">{errors.department.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-unit">Unit</Label>
+                <Controller
+                  name="unit"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope || !watchedDepartment?.trim()}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="cu-unit"
+                        className={cn(errors.unit && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue
+                          placeholder={
+                            !orgScope
+                              ? 'Loading…'
+                              : !watchedDepartment?.trim()
+                                ? 'Select department first…'
+                                : 'Select unit…'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {unitLegacy && watchedUnit ? (
+                          <SelectItem value={watchedUnit}>{watchedUnit} (saved)</SelectItem>
+                        ) : null}
+                        {filteredUnits.map((u) => (
+                          <SelectItem key={u.id} value={u.name}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.unit && <p className="text-xs text-destructive">{errors.unit.message}</p>}
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1054,6 +1192,7 @@ function EditProfileDialog({
       phone: user.phone ?? '',
       rank: user.rank ?? '',
       department: user.department ?? '',
+      unit: user.unit ?? '',
       zone: user.zone ?? '',
       state: user.state ?? '',
     },
@@ -1066,18 +1205,36 @@ function EditProfileDialog({
       phone: user.phone ?? '',
       rank: user.rank ?? '',
       department: user.department ?? '',
+      unit: user.unit ?? '',
       zone: user.zone ?? '',
       state: user.state ?? '',
     });
-  }, [user.id, user.email, user.full_name, user.phone, user.rank, user.department, user.zone, user.state, reset]);
+  }, [user.id, user.email, user.full_name, user.phone, user.rank, user.department, user.unit, user.zone, user.state, reset]);
 
   const watchedZone = useWatch({ control, name: 'zone' });
+  const watchedDepartment = useWatch({ control, name: 'department' });
+  const watchedUnit = useWatch({ control, name: 'unit' });
 
   const { data: orgScope, isLoading: orgScopeLoading } = useQuery({
     queryKey: QUERY_KEYS.orgScopeReference,
     queryFn: () => documentsApi.getOrgScopeReference(),
     staleTime: 60_000,
   });
+
+  const filteredUnits = useMemo(
+    () => unitsForDepartment(orgScope, watchedDepartment),
+    [orgScope, watchedDepartment]
+  );
+
+  const unitLegacy = useMemo(
+    () =>
+      Boolean(
+        watchedUnit?.trim() &&
+          filteredUnits.length > 0 &&
+          !filteredUnits.some((u) => u.name === watchedUnit)
+      ),
+    [watchedUnit, filteredUnits]
+  );
 
   const filteredStateOffices = useMemo(() => {
     if (!orgScope?.stateOffices?.length) return [];
@@ -1098,6 +1255,7 @@ function EditProfileDialog({
         phone: pick(data.phone),
         rank: pick(data.rank),
         department: pick(data.department),
+        unit: pick(data.unit),
         zone: pick(data.zone),
         state: pick(data.state),
       });
@@ -1140,8 +1298,7 @@ function EditProfileDialog({
               <Input id="ep-phone" type="tel" placeholder="+234 …" error={!!errors.phone} {...register('phone')} />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
                 <Label htmlFor="ep-rank">Rank</Label>
                 <Controller
                   name="rank"
@@ -1178,7 +1335,8 @@ function EditProfileDialog({
                   )}
                 />
                 {errors.rank && <p className="text-xs text-destructive">{errors.rank.message}</p>}
-              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="ep-department">Department</Label>
                 <Controller
@@ -1188,7 +1346,10 @@ function EditProfileDialog({
                     <Select
                       disabled={orgScopeLoading || !orgScope}
                       value={field.value ? field.value : SELECT_NONE}
-                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                      onValueChange={(v) => {
+                        field.onChange(v === SELECT_NONE ? '' : v);
+                        setValue('unit', '');
+                      }}
                     >
                       <SelectTrigger
                         id="ep-department"
@@ -1208,6 +1369,47 @@ function EditProfileDialog({
                   )}
                 />
                 {errors.department && <p className="text-xs text-destructive">{errors.department.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-unit">Unit</Label>
+                <Controller
+                  name="unit"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      disabled={orgScopeLoading || !orgScope || !watchedDepartment?.trim()}
+                      value={field.value ? field.value : SELECT_NONE}
+                      onValueChange={(v) => field.onChange(v === SELECT_NONE ? '' : v)}
+                    >
+                      <SelectTrigger
+                        id="ep-unit"
+                        className={cn(errors.unit && 'border-destructive ring-1 ring-destructive')}
+                      >
+                        <SelectValue
+                          placeholder={
+                            !orgScope
+                              ? 'Loading…'
+                              : !watchedDepartment?.trim()
+                                ? 'Select department first…'
+                                : 'Select unit…'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_NONE} className="text-muted-foreground">None</SelectItem>
+                        {unitLegacy && watchedUnit ? (
+                          <SelectItem value={watchedUnit}>{watchedUnit} (saved)</SelectItem>
+                        ) : null}
+                        {filteredUnits.map((u) => (
+                          <SelectItem key={u.id} value={u.name}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.unit && <p className="text-xs text-destructive">{errors.unit.message}</p>}
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
