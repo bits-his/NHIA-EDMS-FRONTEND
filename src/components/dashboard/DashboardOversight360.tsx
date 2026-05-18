@@ -117,8 +117,8 @@ export function DashboardOversight360() {
             <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
               Reports
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-              My performance
+            <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+              Performance
             </Button>
           </div>
         }

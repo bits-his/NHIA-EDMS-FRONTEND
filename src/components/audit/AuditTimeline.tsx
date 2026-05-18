@@ -1,11 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   Shield,
   ChevronDown,
   ChevronRight,
-  User,
   FileText,
   Eye,
   Pencil,
@@ -17,16 +16,18 @@ import {
   ListTodo,
   LogIn,
   Plus,
-  Clock,
+  UserRound,
+  Building2,
 } from 'lucide-react';
+import { parseISO, format, isToday, isYesterday } from 'date-fns';
 import { cn } from '@/utils/cn';
 import { formatDateTime, formatRelative } from '@/utils/formatters';
+import { auditActivityBadge, humanizeAuditAction } from '@/utils/auditLabels';
 import {
-  auditActorDisplayName,
-  auditActivityBadge,
-  humanizeAuditAction,
-  summarizeAuditPayload,
-} from '@/utils/auditLabels';
+  auditActionPhrase,
+  auditActorBlock,
+  documentContextFromLog,
+} from '@/utils/auditDisplay';
 import type { AuditLog } from '@/types/audit';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -38,8 +39,8 @@ interface AuditTimelineProps {
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  'document.create': 'bg-primary/10 text-primary border-primary/20',
-  'document.created': 'bg-primary/10 text-primary border-primary/20',
+  'document.create': 'bg-primary/10 text-primary border-primary/25',
+  'document.created': 'bg-primary/10 text-primary border-primary/25',
   'document.viewed': 'bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-900/20 dark:text-sky-300 dark:border-sky-800',
   'document.updated': 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800',
   'document.submitted': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
@@ -63,7 +64,8 @@ function auditActionIcon(action: string): LucideIcon {
   if (a === 'document.viewed') return Eye;
   if (a === 'document.updated' || a === 'document.edit_forward') return Pencil;
   if (a === 'document.reject') return XCircle;
-  if (a === 'document.approve' || a === 'document.approve_forward' || a === 'document.final_approve') return CheckCircle;
+  if (a === 'document.approve' || a === 'document.approve_forward' || a === 'document.final_approve')
+    return CheckCircle;
   if (a === 'document.submitted') return Send;
   if (a === 'document.archive') return Archive;
   if (a === 'document.create' || a === 'document.created') return Plus;
@@ -73,12 +75,35 @@ function auditActionIcon(action: string): LucideIcon {
   return Shield;
 }
 
+function dateGroupLabel(iso: string): string {
+  try {
+    const d = parseISO(iso);
+    if (isToday(d)) return 'Today';
+    if (isYesterday(d)) return 'Yesterday';
+    return format(d, 'EEEE, MMM d, yyyy');
+  } catch {
+    return 'Earlier';
+  }
+}
+
+function groupLogsByDay(logs: AuditLog[]): { label: string; logs: AuditLog[] }[] {
+  const map = new Map<string, AuditLog[]>();
+  for (const log of logs) {
+    const label = dateGroupLabel(log.created_at);
+    const bucket = map.get(label) ?? [];
+    bucket.push(log);
+    map.set(label, bucket);
+  }
+  return Array.from(map.entries()).map(([label, items]) => ({ label, logs: items }));
+}
+
 function AuditEntry({ log, compact }: { log: AuditLog; compact?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const hasPayload = log.payload && Object.keys(log.payload).length > 0;
   const colorClass = ACTION_COLORS[log.action] ?? 'bg-muted text-muted-foreground border-border';
-  const title = humanizeAuditAction(log.action);
-  const summaryLine = summarizeAuditPayload(log);
+  const headline = auditActionPhrase(log);
+  const actor = auditActorBlock(log);
+  const docCtx = documentContextFromLog(log);
   const docLink =
     log.entity_type === 'document' && log.entity_id ? `/documents/${log.entity_id}` : null;
   const badge = auditActivityBadge(log.action);
@@ -87,110 +112,133 @@ function AuditEntry({ log, compact }: { log: AuditLog; compact?: boolean }) {
   const relTime = formatRelative(log.created_at);
 
   return (
-    <div className="flex gap-3 group">
-      <div className="flex flex-col items-center shrink-0">
+    <article
+      className={cn(
+        'rounded-xl border border-border/80 bg-card p-4 shadow-sm transition-colors hover:border-border',
+        compact && 'p-3'
+      )}
+    >
+      <div className="flex gap-3">
         <div
           className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-full border z-10',
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border',
             colorClass
           )}
         >
-          <Icon className="h-3.5 w-3.5" aria-hidden />
-        </div>
-        <div className="w-px flex-1 bg-border mt-1 group-last:hidden" />
-      </div>
-
-      <div className="flex-1 pb-5 min-w-0 border-b border-border/60 last:border-0">
-        <div className="flex flex-wrap items-center gap-2 gap-y-1">
-          <Badge variant={badge.variant} className="shrink-0 font-semibold tracking-wide">
-            {badge.label}
-          </Badge>
-          <span className="text-sm font-semibold text-foreground leading-snug">{title}</span>
+          <Icon className="h-4 w-4" aria-hidden />
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1 font-medium text-foreground/85">
-            <Clock className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
-            {absTime}
-          </span>
-          <span className="text-muted-foreground/70">·</span>
-          <span>{relTime}</span>
-        </div>
-
-        {!compact && (
-          <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5">{log.action}</p>
-        )}
-
-        {summaryLine && (
-          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">{summaryLine}</p>
-        )}
-
-        {docLink && !compact && (
-          <Link
-            to={docLink}
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1.5 font-medium"
-          >
-            <FileText className="h-3 w-3 shrink-0" />
-            Open document
-          </Link>
-        )}
-
-        <div className="flex items-center gap-2 mt-2 flex-wrap">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <User className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="text-muted-foreground/80">By</span>
-            <span className="font-medium text-foreground">{auditActorDisplayName(log)}</span>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant={badge.variant}
+                  className="shrink-0 text-[10px] font-semibold uppercase tracking-wide"
+                >
+                  {badge.label}
+                </Badge>
+                <span className="text-sm font-semibold text-foreground leading-snug">{headline}</span>
+              </div>
+              {!compact && (
+                <p className="text-[11px] text-muted-foreground">{humanizeAuditAction(log.action)}</p>
+              )}
+            </div>
+            <div className="text-right text-[11px] text-muted-foreground shrink-0">
+              <p className="font-medium text-foreground/90">{relTime}</p>
+              <p>{absTime}</p>
+            </div>
           </div>
-          {log.entity_type && (
-            <>
-              <span className="text-xs text-muted-foreground/60">·</span>
-              <span className="text-xs text-muted-foreground capitalize bg-muted px-1.5 py-0.5 rounded">
-                {log.entity_type.replace(/_/g, ' ')}
-              </span>
-            </>
-          )}
-          {log.entity_id && (
-            <span className="text-xs text-muted-foreground/60 font-mono">
-              #{log.entity_id.slice(0, 8)}
-            </span>
-          )}
-        </div>
 
-        {hasPayload && !compact && (
-          <div className="mt-2">
-            <button
-              type="button"
-              onClick={() => setExpanded((e) => !e)}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              {expanded ? 'Hide' : 'Show'} technical details
-            </button>
-            {expanded && (
-              <pre className="mt-2 text-xs bg-muted/60 border border-border/50 rounded-lg p-3 overflow-x-auto font-mono text-muted-foreground leading-relaxed">
-                {JSON.stringify(log.payload, null, 2)}
-              </pre>
+          <div className="rounded-md bg-muted/40 border border-border/50 px-2.5 py-2 space-y-1">
+            <p className="text-xs font-semibold text-foreground flex flex-wrap items-center gap-1.5">
+              <UserRound className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              {actor.name}
+              {actor.rank && (
+                <Badge variant="outline" className="text-[9px] font-normal py-0 h-4">
+                  {actor.rank}
+                </Badge>
+              )}
+            </p>
+            {actor.orgLine && (
+              <p className="text-[11px] text-muted-foreground pl-5 flex items-start gap-1.5">
+                <Building2 className="h-3 w-3 shrink-0 mt-0.5 opacity-70" />
+                <span>{actor.orgLine}</span>
+              </p>
             )}
           </div>
-        )}
+
+          {docCtx && (
+            <div className="rounded-md border border-dashed border-border/70 px-2.5 py-2 space-y-1.5">
+              {docCtx.title && (
+                <p className="text-xs font-medium text-foreground leading-snug">{docCtx.title}</p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {docCtx.refNumber && (
+                  <Badge variant="secondary" className="font-mono text-[10px] font-normal">
+                    {docCtx.refNumber}
+                  </Badge>
+                )}
+                {docCtx.department && (
+                  <Badge variant="outline" className="text-[10px] font-normal">
+                    {docCtx.department}
+                  </Badge>
+                )}
+                {docCtx.category && (
+                  <Badge variant="outline" className="text-[10px] font-normal capitalize">
+                    {docCtx.category}
+                  </Badge>
+                )}
+                {docCtx.status && (
+                  <Badge variant="outline" className="text-[10px] font-normal capitalize">
+                    {docCtx.status.replace(/_/g, ' ')}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+
+          {docLink && (
+            <Link
+              to={docLink}
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline font-medium"
+            >
+              <FileText className="h-3 w-3 shrink-0" />
+              Open document
+            </Link>
+          )}
+
+          {hasPayload && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setExpanded((e) => !e)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {expanded ? 'Hide' : 'Show'} technical details
+              </button>
+              {expanded && (
+                <pre className="mt-2 text-[11px] bg-muted/60 border border-border/50 rounded-md p-2.5 overflow-x-auto font-mono text-muted-foreground leading-relaxed">
+                  {JSON.stringify(log.payload, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </article>
   );
 }
 
 export function AuditTimeline({ logs, loading, compact }: AuditTimelineProps) {
+  const grouped = useMemo(() => groupLogsByDay(logs), [logs]);
+
   if (loading) {
     return (
-      <div className="space-y-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="flex gap-3">
-            <Skeleton className="h-8 w-8 rounded-full shrink-0" />
-            <div className="flex-1 space-y-1.5 pt-0.5">
-              <Skeleton className="h-5 w-52" />
-              <Skeleton className="h-3 w-64" />
-              <Skeleton className="h-3 w-40" />
-            </div>
-          </div>
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-28 w-full rounded-xl" />
         ))}
       </div>
     );
@@ -200,15 +248,24 @@ export function AuditTimeline({ logs, loading, compact }: AuditTimelineProps) {
     return (
       <div className="flex flex-col items-center py-10 text-center">
         <Shield className="h-8 w-8 text-muted-foreground mb-2" strokeWidth={1.5} />
-        <p className="text-sm text-muted-foreground">No audit entries found</p>
+        <p className="text-sm text-muted-foreground">No activity recorded yet</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-0">
-      {logs.map((log) => (
-        <AuditEntry key={log.id} log={log} compact={compact} />
+    <div className="space-y-5">
+      {grouped.map((group) => (
+        <section key={group.label}>
+          <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2.5 px-0.5">
+            {group.label}
+          </h3>
+          <div className="space-y-2.5">
+            {group.logs.map((log) => (
+              <AuditEntry key={log.id} log={log} compact={compact} />
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   );

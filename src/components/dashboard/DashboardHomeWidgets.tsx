@@ -43,7 +43,7 @@ export function PersonalOperationalSnapshot({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">Your operational performance</p>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => navigate('/operational')}>
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => navigate('/performance')}>
             <Gauge className="h-3.5 w-3.5 mr-1" />
             My performance
           </Button>

@@ -225,7 +225,7 @@ export function ReportingPersonalTab({
         </QueueCard>
       </div>
 
-      <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
+      <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
         Open operational command centre <ArrowRight className="h-3.5 w-3.5 ml-1" />
       </Button>
     </div>

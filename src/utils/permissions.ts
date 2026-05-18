@@ -160,14 +160,33 @@ export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
   if (pathname === '/notifications' || pathname.startsWith('/notifications/')) return true;
   if (pathname === '/documents' || pathname.startsWith('/documents/')) return true;
   if (pathname === '/operational' || pathname.startsWith('/operational')) return true;
+  if (pathname === '/performance' || pathname.startsWith('/performance')) return true;
   if (pathname === '/archive' || pathname.startsWith('/archive')) return true;
-  if (pathname === '/reports' || pathname.startsWith('/reports')) return true;
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) return true;
   return false;
 }
 
-/** Junior staff personal workflow performance (operational page, not org leaderboard). */
+/** Any signed-in user may open `/performance` (personal and/or organisation content). */
 export function canAccessPersonalPerformancePage(roles: string[] | undefined | null): boolean {
-  return isJuniorStaffOnly(roles ?? []);
+  return (roles?.length ?? 0) > 0;
+}
+
+export function isAdminRole(roles: string[] | undefined | null): boolean {
+  return (roles ?? []).some((r) => String(r).toLowerCase() === 'admin');
+}
+
+/** Personal tab on `/performance` — hidden for administrators (organisation view only). */
+export function canViewPersonalPerformanceTab(roles: string[] | undefined | null): boolean {
+  if (!canAccessPersonalPerformancePage(roles)) return false;
+  return !isAdminRole(roles);
+}
+
+/** Sidebar + route: personal metrics for everyone; organisation tab for oversight roles. */
+export function canViewPerformanceNav(
+  roles: string[] | undefined | null,
+  permissions: string[] = []
+): boolean {
+  return canAccessPersonalPerformancePage(roles) || canAccessPerformanceTracking(roles, permissions);
 }
 
 export function showOfficerHomeDashboard(roles: string[]): boolean {

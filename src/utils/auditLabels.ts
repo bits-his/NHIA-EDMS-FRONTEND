@@ -14,6 +14,10 @@ const ACTION_TITLES: Record<string, string> = {
   'document.request_info': 'More information requested',
   'document.final_approve': 'Final approval (filed / archived)',
   'document.archive': 'Document archived',
+  'document.comment': 'Comment on document',
+  'document.discussion.created': 'Discussion started',
+  'document.discussion.message': 'Discussion message',
+  'document.recall': 'Document recalled',
   'task.assigned': 'Workflow task assigned',
   'task.completed': 'Workflow task completed',
   'workflow.advanced': 'Workflow advanced',
@@ -49,6 +53,10 @@ export function auditActivityBadge(action: string): {
   if (a === 'document.archive') return { label: 'Archive', variant: 'muted' };
   if (a === 'document.create' || a === 'document.created') return { label: 'Create', variant: 'default' };
   if (a === 'document.request_info') return { label: 'Request info', variant: 'warning' };
+  if (a === 'document.comment' || a === 'document.discussion.message') {
+    return { label: 'Comment', variant: 'info' };
+  }
+  if (a === 'document.discussion.created') return { label: 'Discussion', variant: 'secondary' };
   if (a.startsWith('workflow.')) return { label: 'Workflow', variant: 'secondary' };
   if (a.startsWith('task.')) return { label: 'Task', variant: 'secondary' };
   if (a.startsWith('user.')) return { label: 'Account', variant: 'outline' };
@@ -65,6 +73,43 @@ export function auditActorDisplayName(log: Pick<AuditLog, 'actor_id' | 'actor_fu
 }
 
 /** One-line context from payload for list views (non-JSON). */
+/** Plain-language one-liner for timeline cards (what happened, who, when context). */
+export function describeAuditEvent(log: AuditLog): string {
+  const who = auditActorDisplayName(log);
+  const action = humanizeAuditAction(log.action);
+  const detail = summarizeAuditPayload(log);
+
+  if (log.action === 'document.viewed') {
+    return detail ? `${who} opened ${detail}` : `${who} viewed a document`;
+  }
+  if (log.action === 'document.updated') {
+    return detail ? `${who} saved changes to ${detail}` : `${who} updated a document`;
+  }
+  if (log.action === 'document.submitted') {
+    return detail ? `${who} submitted ${detail} into workflow` : `${who} submitted a document for review`;
+  }
+  if (log.action === 'document.approve' || log.action === 'document.approve_forward') {
+    return detail ? `${who} approved ${detail}` : `${who} approved a document`;
+  }
+  if (log.action === 'document.reject') {
+    return detail ? `${who} rejected ${detail}` : `${who} sent a document back`;
+  }
+  if (log.action === 'document.archive' || log.action === 'document.final_approve') {
+    return detail ? `${who} filed / archived ${detail}` : `${who} completed final filing`;
+  }
+  if (log.action === 'user.login') {
+    return `${who} signed in to the system`;
+  }
+  if (log.action.startsWith('task.')) {
+    return detail ? `${who} — ${action}: ${detail}` : `${who} — ${action}`;
+  }
+  if (log.action.startsWith('workflow.')) {
+    return detail ? `${who} moved workflow forward: ${detail}` : `${who} — ${action}`;
+  }
+
+  return detail ? `${who} — ${action}: ${detail}` : `${who} — ${action}`;
+}
+
 export function summarizeAuditPayload(log: AuditLog): string | null {
   const p = log.payload;
   if (!p || typeof p !== 'object') return null;

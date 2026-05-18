@@ -411,8 +411,8 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
             <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
               Reports
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-              My performance
+            <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+              Performance
             </Button>
             <Button variant="outline" size="sm" onClick={() => navigate('/documents')}>
               Documents
@@ -869,8 +869,8 @@ function OfficerDashboard() {
         actions={
           <div className="flex items-center gap-2">
             {showPersonalPerformance && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-                <Activity className="h-4 w-4" /> My performance
+              <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+                <Activity className="h-4 w-4" /> Performance
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
@@ -1066,7 +1066,6 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
 
   const roles = user?.roles ?? [];
   const permissions = user?.permissions ?? [];
-  const showTeamPerformance = canAccessPerformanceTracking(roles, permissions);
   const showPersonalPerformance = canAccessPersonalPerformancePage(roles);
 
   const scopedDocuments = useMemo(() => {
@@ -1124,18 +1123,13 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
         actions={
           <div className="flex items-center gap-2">
             {showPersonalPerformance && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
-                <Activity className="h-4 w-4" /> My performance
+              <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+                <Activity className="h-4 w-4" /> Performance
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
               <BarChart3 className="h-4 w-4" /> Reports
             </Button>
-            {showTeamPerformance && !showPersonalPerformance && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
-                <Trophy className="h-4 w-4" /> View performance
-              </Button>
-            )}
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>

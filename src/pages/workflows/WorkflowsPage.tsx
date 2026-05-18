@@ -64,8 +64,7 @@ export default function WorkflowsPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader
-          title="Workflow Templates"
-          description="Approval process templates — select one when submitting a document, or create your own linear route."
+          title=""
         />
         {canCreateCustomWorkflow ? (
           <Button type="button" className="shrink-0 gap-2 w-fit" onClick={() => setEditor({ mode: 'create' })}>
@@ -84,21 +83,6 @@ export default function WorkflowsPage() {
         onSaved={() => refetch()}
       />
 
-      <Alert variant="info">
-        <Info className="h-4 w-4" />
-        <AlertDescription>
-          <strong>How it works:</strong> Use a catalogue template below, or{' '}
-          {canCreateCustomWorkflow ? (
-            <>
-              use <strong>Custom workflow</strong> to define steps without picking an existing template name — then start
-              a document with that new route.
-            </>
-          ) : (
-            <>ask an administrator to grant submitter access if you need to define ad-hoc routes.</>
-          )}{' '}
-          Each step assigns tasks to the chosen NHIA role.
-        </AlertDescription>
-      </Alert>
 
       {!error && !isLoading && templates?.length ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -108,8 +92,9 @@ export default function WorkflowsPage() {
               type="search"
               placeholder="Search by name or template ID…"
               value={query}
+
               onChange={(e) => setQuery(e.target.value)}
-              className="pl-9"
+              className="pl-9 "
               aria-label="Search workflow templates"
             />
           </div>

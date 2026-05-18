@@ -4,6 +4,10 @@ export interface AuditLog {
   /** Populated by audit agent from `users` for display (optional on older responses). */
   actor_username?: string | null;
   actor_full_name?: string | null;
+  actor_staff_id?: string | null;
+  actor_department?: string | null;
+  actor_unit?: string | null;
+  actor_rank?: string | null;
   action: string;
   entity_type: string;
   entity_id?: string;

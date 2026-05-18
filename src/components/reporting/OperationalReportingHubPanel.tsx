@@ -925,7 +925,7 @@ export function OperationalReportingHubPanel() {
           </Button>
           {oversight ? (
             <>
-              <Button variant="ghost" size="sm" className="h-8 hidden md:inline-flex" onClick={() => navigate('/operational')}>
+              <Button variant="ghost" size="sm" className="h-8 hidden md:inline-flex" onClick={() => navigate('/performance')}>
                 Command centre
               </Button>
               <Button variant="ghost" size="sm" className="h-8 hidden md:inline-flex" onClick={() => navigate('/performance')}>
@@ -933,7 +933,7 @@ export function OperationalReportingHubPanel() {
               </Button>
             </>
           ) : (
-            <Button variant="ghost" size="sm" className="h-8" onClick={() => navigate('/operational')}>
+            <Button variant="ghost" size="sm" className="h-8" onClick={() => navigate('/performance')}>
               My operations
             </Button>
           )}

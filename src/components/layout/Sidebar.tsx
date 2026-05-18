@@ -2,12 +2,10 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   FileText,
-  CheckSquare,
   GitBranch,
   Shield,
   Bell,
   Search,
-  Settings,
   ChevronLeft,
   ChevronRight,
   Users,
@@ -15,7 +13,6 @@ import {
   Trophy,
   Archive,
   FileBarChart,
-  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
@@ -23,8 +20,8 @@ import { cn } from '@/utils/cn';
 import {
   canAccessTemplateManagement,
   canAccessAuditLogModule,
-  canAccessPerformanceTracking,
   canManageUsers,
+  canViewPerformanceNav,
   isJuniorStaffOnly,
 } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
@@ -44,16 +41,16 @@ type NavItem = {
 const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', juniorVisible: true },
   { to: '/documents', icon: FileText, label: 'Documents', juniorVisible: true },
-  { to: '/tasks', icon: CheckSquare, label: 'My Tasks' },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
-  { to: '/audit', icon: Shield, label: 'Audit Log', requiresAuditAccess: true },
+  { to: '/audit', icon: Shield, label: 'Audit log', requiresAuditAccess: true },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true, juniorVisible: true },
   { to: '/search', icon: Search, label: 'Search & OCR' },
 ];
 
 const recordsNavItems: NavItem[] = [
-  { to: '/archive', icon: Archive, label: 'Archive', juniorVisible: true },
-  { to: '/reports', icon: FileBarChart, label: 'Reports', juniorVisible: true },
+  { to: '/archive', icon: Archive, label: 'Document archive', juniorVisible: true },
+  { to: '/reports', icon: FileBarChart, label: 'Reports' },
+  { to: '/performance', icon: Trophy, label: 'Performance', juniorVisible: true },
 ];
 
 const adminNavItems = [
@@ -74,11 +71,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const showUserManagement = canManageUsers(roles);
   const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
   const showAuditNav = canAccessAuditLogModule(user?.roles);
-  const showPerformanceNav = canAccessPerformanceTracking(
-    user?.roles,
-    user?.permissions ?? []
-  );
-  const showSettings = !juniorOnly;
+  const showPerformanceNav = canViewPerformanceNav(user?.roles, user?.permissions ?? []);
+
+  const visibleRecordsNavItems = recordsNavItems.filter((item) => {
+    if (juniorOnly && !item.juniorVisible) return false;
+    if (item.to === '/performance' && !showPerformanceNav) return false;
+    return true;
+  });
 
   return (
     <aside
@@ -171,7 +170,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           return <div key={to}>{linkContent}</div>;
         })}
 
-        {/* ── Archive & reports ── */}
+        {/* ── Records (archive, reports, performance) ── */}
+        {visibleRecordsNavItems.length > 0 && (
         <>
           {!collapsed && (
             <div className="px-3 pt-3 pb-1">
@@ -181,12 +181,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </div>
           )}
           {collapsed && <div className="my-1 mx-2 h-px bg-sidebar-border" />}
-          {recordsNavItems
-            .filter((item) => !(juniorOnly && !item.juniorVisible))
-            .map(({ to, icon: Icon, label }) => {
+          {visibleRecordsNavItems.map(({ to, icon: Icon, label }) => {
               const isActive =
                 location.pathname === to ||
-                (to === '/reports' && location.pathname.startsWith('/reports'));
+                (to === '/reports' && location.pathname.startsWith('/reports')) ||
+                (to === '/performance' &&
+                  (location.pathname.startsWith('/performance') ||
+                    location.pathname.startsWith('/operational')));
               const linkContent = (
                 <NavLink
                   to={to}
@@ -213,79 +214,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               return <div key={to}>{linkContent}</div>;
             })}
         </>
-
-        {showPerformanceNav && (
-          <>
-            {!collapsed && (
-              <div className="px-3 pt-3 pb-1">
-                <p className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest">
-                  Insights
-                </p>
-              </div>
-            )}
-            {collapsed && <div className="my-1 mx-2 h-px bg-sidebar-border" />}
-            {(() => {
-              const to = '/operational';
-              const Icon = Gauge;
-              const label = 'My performance';
-              const isActive = location.pathname.startsWith('/operational');
-              const linkContent = (
-                <NavLink
-                  to={to}
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
-                    collapsed ? 'justify-center px-0 w-10 mx-auto' : '',
-                    isActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                      : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
-                  )}
-                >
-                  <Icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
-                  {!collapsed && <span className="truncate">{label}</span>}
-                </NavLink>
-              );
-              if (collapsed) {
-                return (
-                  <Tooltip key={to} delayDuration={0}>
-                    <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
-                    <TooltipContent side="right">{label}</TooltipContent>
-                  </Tooltip>
-                );
-              }
-              return <div key={to}>{linkContent}</div>;
-            })()}
-            {(() => {
-              const to = '/performance';
-              const Icon = Trophy;
-              const label = 'Performance';
-              const isActive = location.pathname.startsWith('/performance');
-              const linkContent = (
-                <NavLink
-                  to={to}
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
-                    collapsed ? 'justify-center px-0 w-10 mx-auto' : '',
-                    isActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                      : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
-                  )}
-                >
-                  <Icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
-                  {!collapsed && <span className="truncate">{label}</span>}
-                </NavLink>
-              );
-              if (collapsed) {
-                return (
-                  <Tooltip key={to} delayDuration={0}>
-                    <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
-                    <TooltipContent side="right">{label}</TooltipContent>
-                  </Tooltip>
-                );
-              }
-              return <div key={to}>{linkContent}</div>;
-            })()}
-          </>
         )}
+
+
 
         {/* ── Template management (admin / records roles) ── */}
         {showTemplateMgmt && (
@@ -374,37 +305,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* ── Bottom section ── */}
       <div className="border-t border-sidebar-border p-2 space-y-1">
-        {/* Settings link — hidden for junior staff (officer / senior_officer only) */}
-        {showSettings &&
-          (collapsed ? (
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <NavLink
-                  to="/settings"
-                  className="flex items-center justify-center w-10 mx-auto rounded-lg py-2.5 text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground transition-all"
-                >
-                  <Settings className="h-5 w-5" />
-                </NavLink>
-              </TooltipTrigger>
-              <TooltipContent side="right">Settings</TooltipContent>
-            </Tooltip>
-          ) : (
-            <NavLink
-              to="/settings"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
-                )
-              }
-            >
-              <Settings className="h-4 w-4 shrink-0" />
-              <span>Settings</span>
-            </NavLink>
-          ))}
-
         {/* User info — expanded only */}
         {!collapsed && user && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg">

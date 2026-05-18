@@ -65,18 +65,12 @@ import { cn } from '@/utils/cn';
  * that needs their attention. Leadership oversight roles see broader sets, which
  * is acceptable since their "Action required" view is intentionally inclusive.
  */
-type DocumentBucket = 'all' | 'drafts' | 'action' | 'completed' | 'archive';
-
-const FINISHED_STATUSES: ReadonlySet<DocumentStatus> = new Set([
-  'approved',
-  'archived',
-  'rejected',
-]);
+/** Active work queues only — filed/archived records live under Document archive. */
+type DocumentBucket = 'all' | 'drafts' | 'action' | 'completed';
 
 function bucketForStatus(status: DocumentStatus): Exclude<DocumentBucket, 'all'> {
   if (status === 'draft') return 'drafts';
   if (status === 'pending') return 'action';
-  if (status === 'archived') return 'archive';
   return 'completed';
 }
 
@@ -159,7 +153,6 @@ export default function DocumentsPage() {
     search.trim() ||
       categoryFilter !== 'all' ||
       directionFilter !== 'all' ||
-      bucket === 'archive' ||
       dateFrom.trim() ||
       dateTo.trim()
   );
@@ -168,7 +161,6 @@ export default function DocumentsPage() {
     ...(search.trim() ? { keyword: search.trim() } : {}),
     ...(categoryFilter !== 'all' ? { category: categoryFilter } : {}),
     ...(directionFilter !== 'all' ? { correspondence_direction: directionFilter } : {}),
-    ...(bucket === 'archive' ? { status: 'archived' as const } : {}),
     ...(dateFrom.trim() ? { date_from: `${dateFrom.trim()}T00:00:00.000Z` } : {}),
     ...(dateTo.trim() ? { date_to: `${dateTo.trim()}T23:59:59.999Z` } : {}),
   };
@@ -210,7 +202,10 @@ export default function DocumentsPage() {
     if (directoryUsers.length) registerUsers(directoryUsers);
   }, [directoryUsers]);
 
-  const docs = allDocuments ?? [];
+  const docs = useMemo(
+    () => (allDocuments ?? []).filter((d) => d.status !== 'archived'),
+    [allDocuments]
+  );
 
   const overdueByDocId = useMemo(() => {
     const m = new Map<string, boolean>();
@@ -239,12 +234,11 @@ export default function DocumentsPage() {
       acc[bucketForStatus(d.status)] += 1;
       return acc;
     },
-    { all: 0, drafts: 0, action: 0, completed: 0, archive: 0 }
+    { all: 0, drafts: 0, action: 0, completed: 0 }
   );
 
   const filtered = docs.filter((doc) => {
     if (bucket === 'all') return true;
-    if (bucket === 'archive') return doc.status === 'archived';
     if (bucket === 'drafts') return doc.status === 'draft';
     if (bucket === 'action') return doc.status === 'pending';
     if (bucket === 'completed') return doc.status === 'approved' || doc.status === 'rejected';
@@ -400,7 +394,6 @@ export default function DocumentsPage() {
                   <SelectItem value="drafts">Drafts ({bucketCounts.drafts})</SelectItem>
                   <SelectItem value="action">Action required ({bucketCounts.action})</SelectItem>
                   <SelectItem value="completed">Completed ({bucketCounts.completed})</SelectItem>
-                  <SelectItem value="archive">Archive ({bucketCounts.archive})</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -543,7 +536,7 @@ export default function DocumentsPage() {
               : bucket === 'action'
                 ? 'You are all caught up. Pending documents that need your input will land here.'
                 : bucket === 'completed'
-                  ? 'Approved, archived and rejected documents you participated in will appear here.'
+                  ? 'Approved and rejected documents you participated in will appear here. Filed records are in Document archive.'
                   : hasFilters
                     ? 'Try adjusting your search or filters'
                     : 'Start your first process to get a document in the list'
