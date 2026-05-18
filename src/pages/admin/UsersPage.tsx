@@ -434,6 +434,7 @@ function UsersTable({
           {users.map((u, idx) => {
             const orgLines = organisationCellLines(u);
             const orgTitle = organisationSummary(u);
+            const rankLabel = displayOrDash(u.rank ?? u.grade_level);
             return (
               <tr
                 key={u.id}
@@ -472,8 +473,11 @@ function UsersTable({
                   ) : null}
                 </td>
                 <td className={TD}>
-                  <span className="block truncate text-[13px]" title={u.rank ?? u.grade_level ?? undefined}>
-                    {displayOrDash(u.rank ?? u.grade_level)}
+                  <span
+                    className="block truncate text-[13px]"
+                    title={rankLabel !== '—' ? rankLabel : undefined}
+                  >
+                    {rankLabel}
                   </span>
                 </td>
                 <td className="px-3 py-3 align-top">
