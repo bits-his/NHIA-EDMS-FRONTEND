@@ -159,7 +159,15 @@ export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
   if (pathname === '/dashboard') return true;
   if (pathname === '/notifications' || pathname.startsWith('/notifications/')) return true;
   if (pathname === '/documents' || pathname.startsWith('/documents/')) return true;
+  if (pathname === '/operational' || pathname.startsWith('/operational')) return true;
+  if (pathname === '/archive' || pathname.startsWith('/archive')) return true;
+  if (pathname === '/reports' || pathname.startsWith('/reports')) return true;
   return false;
+}
+
+/** Junior staff personal workflow performance (operational page, not org leaderboard). */
+export function canAccessPersonalPerformancePage(roles: string[] | undefined | null): boolean {
+  return isJuniorStaffOnly(roles ?? []);
 }
 
 export function showOfficerHomeDashboard(roles: string[]): boolean {

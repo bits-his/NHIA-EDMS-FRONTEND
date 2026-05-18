@@ -59,18 +59,18 @@ function formatHours(hours: number | null | undefined): string {
   return `${days.toFixed(1)}d`;
 }
 
-function completedBreakdown(row: PerformanceLeaderboardEntry): string {
+function contributionBreakdown(row: PerformanceLeaderboardEntry): string {
   const parts: string[] = [];
-  if (row.workflow_completions > 0) {
-    parts.push(`${row.workflow_completions} review${row.workflow_completions !== 1 ? 's' : ''}`);
+  if (row.tasks_completed > 0) {
+    parts.push(`${row.tasks_completed} task${row.tasks_completed !== 1 ? 's' : ''}`);
   }
-  if (row.document_submissions > 0) {
-    parts.push(`${row.document_submissions} sent`);
+  if (row.documents_initiated > 0) {
+    parts.push(`${row.documents_initiated} initiated`);
   }
-  if (row.owner_actions > 0) {
-    parts.push(`${row.owner_actions} owner action${row.owner_actions !== 1 ? 's' : ''}`);
+  if (row.documents_approved > 0) {
+    parts.push(`${row.documents_approved} approved`);
   }
-  return parts.length ? parts.join(' · ') : String(row.completed_count);
+  return parts.length ? parts.join(' · ') : String(row.total_contribution);
 }
 
 function staffDisplayName(row: PerformanceLeaderboardEntry): string {
@@ -143,8 +143,8 @@ export default function PerformancePage() {
         title="Performance tracking"
         description={
           data
-            ? `${data.scope.label} · Workflow reviews, document submissions (create → send), and owner follow-up actions (${data.slaDays}-day SLA).`
-            : 'Staff response times on workflow tasks and document creation.'
+            ? `${data.scope.label} · Time on workflow tasks (per document), documents initiated, documents approved, and completed tasks.`
+            : 'Workflow contribution from tasks, document initiation, and approvals.'
         }
         actions={
           <Select value={period} onValueChange={(v) => setPeriod(v as PeriodPreset)}>
@@ -173,35 +173,34 @@ export default function PerformancePage() {
             />
             <StatCard
               icon={CheckCircle}
-              label="Total actions"
-              value={isLoading ? '—' : String(summary?.totalActions ?? 0)}
+              label="Tasks completed"
+              value={isLoading ? '—' : String(summary?.tasksCompleted ?? 0)}
               sub={
                 isLoading
                   ? undefined
-                  : `${summary?.tasksCompleted ?? 0} reviews · ${summary?.submissionsCompleted ?? 0} sent`
+                  : `${summary?.documentsInitiated ?? 0} docs initiated · ${summary?.documentsApproved ?? 0} approved`
               }
               loading={isLoading}
             />
             <StatCard
               icon={Timer}
-              label="Median time to act"
-              value={isLoading ? '—' : formatHours(summary?.medianHoursToAct ?? null)}
-              sub={isLoading ? undefined : `Avg ${formatHours(summary?.avgHoursToAct ?? null)}`}
+              label="Median time on task"
+              value={isLoading ? '—' : formatHours(summary?.medianTaskHours ?? null)}
+              sub={isLoading ? undefined : `Avg ${formatHours(summary?.avgTaskHours ?? null)}`}
               loading={isLoading}
             />
             <StatCard
               icon={TrendingUp}
-              label="On-time completion"
-              value={isLoading ? '—' : `${summary?.onTimeRate ?? 0}%`}
+              label="Total contributions"
+              value={isLoading ? '—' : String(summary?.totalContributions ?? 0)}
               sub={
                 isLoading
                   ? undefined
                   : summary?.overdueActive
-                    ? `${summary.overdueActive} overdue active`
-                    : `Within ${data?.slaDays ?? 3}-day SLA`
+                    ? `${summary.overdueActive} overdue active tasks`
+                    : 'Tasks + initiated + approved'
               }
               loading={isLoading}
-              accent={summary && summary.onTimeRate >= 80 ? 'positive' : undefined}
             />
           </div>
 
@@ -210,11 +209,11 @@ export default function PerformancePage() {
               <CardHeader className="pb-3 border-b border-border/60 bg-muted/20">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Trophy className="h-4 w-4 text-amber-600" />
-                  Leaderboard — fastest responders
+                  Workflow contribution leaderboard
                 </CardTitle>
                 <p className="text-xs text-muted-foreground font-normal mt-1">
-                  Includes workflow reviewers and document creators. Ranked by average hours from
-                  assignment or draft creation to action.
+                  Ranked by completed tasks, documents initiated, and documents approved. Task time
+                  is measured from assignment to completion on each linked document.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -229,7 +228,7 @@ export default function PerformancePage() {
                     <EmptyState
                       icon={Clock}
                       title="No performance data yet"
-                      description="Data appears when staff complete workflow tasks, submit documents they created, or act on returned correspondence in this period."
+                      description="Data appears when staff complete workflow tasks, initiate documents, or approve documents in this period."
                     />
                   </div>
                 ) : (
@@ -240,9 +239,10 @@ export default function PerformancePage() {
                           <th className="px-4 py-3 w-12">#</th>
                           <th className="px-4 py-3">Staff</th>
                           <th className="px-4 py-3 hidden md:table-cell">Department</th>
-                          <th className="px-4 py-3 text-right">Actions</th>
-                          <th className="px-4 py-3 text-right">Avg time</th>
-                          <th className="px-4 py-3 text-right">On time</th>
+                          <th className="px-4 py-3 text-right">Tasks</th>
+                          <th className="px-4 py-3 text-right hidden lg:table-cell">Initiated</th>
+                          <th className="px-4 py-3 text-right hidden lg:table-cell">Approved</th>
+                          <th className="px-4 py-3 text-right">Avg task time</th>
                           <th className="px-4 py-3 text-right hidden sm:table-cell">Overdue</th>
                         </tr>
                       </thead>
@@ -267,33 +267,31 @@ export default function PerformancePage() {
                                   {row.rank_label}
                                 </p>
                               )}
+                              <p className="text-[10px] text-muted-foreground lg:hidden mt-0.5">
+                                {contributionBreakdown(row)}
+                              </p>
                             </td>
                             <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
                               {row.department_name || '—'}
                             </td>
-                            <td className="px-4 py-3 text-right">
-                              <span className="font-medium tabular-nums">{row.completed_count}</span>
-                              <p className="text-[10px] text-muted-foreground max-w-[140px] ml-auto">
-                                {completedBreakdown(row)}
-                              </p>
+                            <td className="px-4 py-3 text-right font-medium tabular-nums">
+                              {row.tasks_completed}
+                            </td>
+                            <td className="px-4 py-3 text-right hidden lg:table-cell tabular-nums text-muted-foreground">
+                              {row.documents_initiated}
+                            </td>
+                            <td className="px-4 py-3 text-right hidden lg:table-cell tabular-nums text-muted-foreground">
+                              {row.documents_approved}
                             </td>
                             <td className="px-4 py-3 text-right">
                               <span className="font-mono font-medium text-foreground">
-                                {formatHours(row.avg_hours_to_act)}
+                                {formatHours(row.avg_task_hours)}
                               </span>
-                              {row.median_hours_to_act != null && (
+                              {row.median_task_hours != null && (
                                 <p className="text-[10px] text-muted-foreground">
-                                  med {formatHours(row.median_hours_to_act)}
+                                  med {formatHours(row.median_task_hours)}
                                 </p>
                               )}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Badge
-                                variant={row.on_time_rate >= 80 ? 'default' : 'secondary'}
-                                className="text-xs font-normal"
-                              >
-                                {row.on_time_rate}%
-                              </Badge>
                             </td>
                             <td className="px-4 py-3 text-right hidden sm:table-cell">
                               {row.overdue_active > 0 ? (
@@ -318,7 +316,7 @@ export default function PerformancePage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <TrendingUp className="h-4 w-4 text-primary" />
-                  Response time trend
+                  Task completion trend
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -333,13 +331,16 @@ export default function PerformancePage() {
                     <LineChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                       <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 10 }} width={28} allowDecimals={false} />
                       <YAxis
+                        yAxisId="right"
+                        orientation="right"
                         tick={{ fontSize: 10 }}
                         width={36}
                         label={{
                           value: 'hrs',
                           angle: -90,
-                          position: 'insideLeft',
+                          position: 'insideRight',
                           style: { fontSize: 10 },
                         }}
                       />
@@ -351,24 +352,34 @@ export default function PerformancePage() {
                         }}
                         formatter={(value, name) => {
                           const n = typeof value === 'number' ? value : Number(value ?? 0);
-                          if (name === 'avg_hours') return [formatHours(n), 'Avg response'];
-                          return [n, 'Completed'];
+                          if (name === 'avg_task_hours') return [formatHours(n), 'Avg task time'];
+                          return [n, 'Tasks completed'];
                         }}
                       />
                       <Line
+                        yAxisId="left"
                         type="monotone"
-                        dataKey="avg_hours"
+                        dataKey="tasks_completed"
                         stroke="hsl(var(--primary))"
                         strokeWidth={2}
                         dot={{ r: 3 }}
-                        name="avg_hours"
+                        name="tasks_completed"
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="avg_task_hours"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        name="avg_task_hours"
                       />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
                 {data && trendData.length > 0 && (
                   <p className="text-[11px] text-muted-foreground mt-3 text-center">
-                    Daily average hours from assignment or document creation to action
+                    Daily completed tasks and average hours from assignment to completion
                   </p>
                 )}
               </CardContent>

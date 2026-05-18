@@ -17,6 +17,7 @@ import type {
 } from '@/types/document';
 import type { DocumentTemplate, SaveDocumentTemplatePayload } from '@/types/documentTemplate';
 import type { OrgScopeReferenceResponse } from '@/types/orgScope';
+import type { RegistryListResponse, RegistrySearchFilters } from '@/types/registry';
 
 export const documentsApi = {
   listAll: async (): Promise<Document[]> => {
@@ -26,6 +27,20 @@ export const documentsApi = {
 
   search: async (filters: DocumentSearchFilters): Promise<Document[]> => {
     const res = await documentClient.get<Document[]>('/documents/search', { params: filters });
+    return res.data;
+  },
+
+  listArchiveRegistry: async (filters?: RegistrySearchFilters): Promise<RegistryListResponse> => {
+    const res = await documentClient.get<RegistryListResponse>('/documents/registry/archive', {
+      params: filters,
+    });
+    return res.data;
+  },
+
+  listReportsRegistry: async (filters?: RegistrySearchFilters): Promise<RegistryListResponse> => {
+    const res = await documentClient.get<RegistryListResponse>('/documents/registry/reports', {
+      params: filters,
+    });
     return res.data;
   },
 
@@ -160,6 +175,15 @@ export const documentsApi = {
     const res = await documentClient.get<Blob>(`/documents/${documentId}/signatory-signature`, {
       responseType: 'blob',
     });
+    return res.data;
+  },
+
+  /** E-signature image for a user who final-approved (comments thread). */
+  getActorSignatureBlob: async (documentId: string, actorUserId: string): Promise<Blob> => {
+    const res = await documentClient.get<Blob>(
+      `/documents/${documentId}/actors/${actorUserId}/signature`,
+      { responseType: 'blob' }
+    );
     return res.data;
   },
 

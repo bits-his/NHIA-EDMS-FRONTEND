@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { MessageSquare, Paperclip, Send, Upload, X } from 'lucide-react';
@@ -36,6 +36,8 @@ const ACTION_LABELS: Record<string, string> = {
 
 /** Shown in the thread even when `comment` is empty (workflow milestones). */
 const ACTIONS_VISIBLE_WITHOUT_COMMENT = new Set(['final_approve', 'final_approval']);
+
+const SIGNATURE_STAMP_ACTIONS = new Set(['final_approve', 'final_approval']);
 
 const ACTION_TONE: Record<string, string> = {
   reject: 'bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-900/20 dark:text-red-400 dark:ring-red-800',
@@ -92,6 +94,52 @@ function resolveActorTitle(a: DocumentWorkflowAction): string {
   const roleName = a.actor_role_name?.trim();
   if (roleName) return roleName.replace(/_/g, ' ');
   return '';
+}
+
+function CommentApproverSignature({
+  documentId,
+  action,
+}: {
+  documentId: string;
+  action: DocumentWorkflowAction;
+}) {
+  const actorId = action.actor_id;
+  const enabled = !!actorId && SIGNATURE_STAMP_ACTIONS.has(action.action);
+
+  const { data: objectUrl } = useQuery({
+    queryKey: QUERY_KEYS.documentActorSignature(documentId, actorId ?? ''),
+    queryFn: async () => {
+      const blob = await documentsApi.getActorSignatureBlob(documentId, actorId!);
+      return URL.createObjectURL(blob);
+    },
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  useEffect(() => {
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [objectUrl]);
+
+  if (!enabled || !objectUrl) return null;
+
+  return (
+    <div
+      className="mt-2 rounded-md border border-violet-200/80 bg-violet-50/50 dark:border-violet-800/50 dark:bg-violet-950/20 p-2.5"
+      aria-label={`E-signature of ${actorDisplay(action)}`}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800/80 dark:text-violet-300/80 mb-1.5">
+        Approver signature
+      </p>
+      <img
+        src={objectUrl}
+        alt=""
+        className="max-h-[72px] max-w-[260px] object-contain object-left"
+      />
+    </div>
+  );
 }
 
 function actorContext(a: DocumentWorkflowAction): string {
@@ -389,8 +437,9 @@ export function DocumentCommentsSection({
                     Final approval closes this chain
                   </p>
                   <p className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-300/80">
-                    The document will be marked <span className="font-medium">approved</span> and no
-                    further recipients can act on it. No next recipient is needed.
+                    The document will be marked <span className="font-medium">approved</span>, your
+                    e-signature from Settings will be appended to the memo and shown here, and no
+                    further recipients can act on it.
                   </p>
                 </div>
               )}
@@ -613,9 +662,12 @@ export function DocumentCommentsSection({
                     </p>
                   ) : ACTIONS_VISIBLE_WITHOUT_COMMENT.has(c.action) ? (
                     <p className="text-sm text-muted-foreground italic leading-relaxed">
-                      No written comment — signature and filing are on the document.
+                      {SIGNATURE_STAMP_ACTIONS.has(c.action)
+                        ? 'Final approval recorded.'
+                        : 'No written comment.'}
                     </p>
                   ) : null}
+                  <CommentApproverSignature documentId={documentId} action={c} />
                 </div>
               </li>
             );

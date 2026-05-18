@@ -5,7 +5,7 @@ import {
   FileText, Layers, CheckSquare, Shield, Plus, Search,
   ArrowRight, Bell,   TrendingUp, Clock, AlertTriangle, Activity, Users,
   CheckCircle, XCircle, LayoutDashboard, User, Radar,
-  BarChart3,
+  BarChart3, Trophy,
 } from 'lucide-react';
 import {
   Bar,
@@ -41,6 +41,8 @@ import {
   showOfficerHomeDashboard,
   canDirectorToggleOperationalDashboard,
   canAccessAuditLogModule,
+  canAccessPerformanceTracking,
+  canAccessPersonalPerformancePage,
   isDirectorGeneralRole,
 } from '@/utils/permissions';
 import { resolveUsername, registerUsers } from '@/utils/users';
@@ -334,6 +336,9 @@ function Operational360Dashboard() {
         description={`Unified view of the document lifecycle, workflow tasks, and signals you are allowed to see — aligned with NHIA EDMS visibility rules.${orgHint ? ` Your profile context: ${orgHint}.` : ''}`}
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+              <Trophy className="h-4 w-4" /> View performance
+            </Button>
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>
@@ -1206,6 +1211,7 @@ function OfficerDashboard() {
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const showAuditLogPage = canAccessAuditLogModule(user?.roles);
+  const showPersonalPerformance = canAccessPersonalPerformancePage(user?.roles ?? []);
 
   const { data: recentAudit, isLoading: auditLoading } = useQuery({
     queryKey: ['audit-recent', user?.user_id],
@@ -1294,6 +1300,11 @@ function OfficerDashboard() {
         description={`Welcome back, ${user?.username ?? 'there'}. Your memos and system activity — submissions and workflow steps are tracked on each document.`}
         actions={
           <div className="flex items-center gap-2">
+            {showPersonalPerformance && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
+                <Trophy className="h-4 w-4" /> View performance
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>
@@ -1460,6 +1471,11 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
     staleTime: 30_000,
   });
 
+  const roles = user?.roles ?? [];
+  const permissions = user?.permissions ?? [];
+  const showTeamPerformance = canAccessPerformanceTracking(roles, permissions);
+  const showPersonalPerformance = canAccessPersonalPerformancePage(roles);
+
   const scopedDocuments = useMemo(() => {
     const raw = myDocuments ?? [];
     if (documentScope !== 'mine' || !user?.user_id) return raw;
@@ -1514,6 +1530,16 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
         }
         actions={
           <div className="flex items-center gap-2">
+            {showPersonalPerformance && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/operational')}>
+                <Trophy className="h-4 w-4" /> View performance
+              </Button>
+            )}
+            {showTeamPerformance && !showPersonalPerformance && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/performance')}>
+                <Trophy className="h-4 w-4" /> View performance
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
               <Search className="h-4 w-4" /> Search
             </Button>

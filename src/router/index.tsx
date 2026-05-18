@@ -9,6 +9,11 @@ const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
 const ExecutiveReportPage = lazy(() => import('@/pages/dashboard/ExecutiveReportPage'));
 const PerformancePage = lazy(() => import('@/pages/performance/PerformancePage'));
+const OperationalPage = lazy(() => import('@/pages/operational/OperationalPage'));
+const ArchivePage = lazy(() => import('@/pages/registry/RegistryDocumentsPage'));
+const ReportsPage = lazy(() =>
+  import('@/pages/registry/RegistryDocumentsPage').then((m) => ({ default: m.ReportsPage }))
+);
 const DocumentsPage = lazy(() => import('@/pages/documents/DocumentsPage'));
 const DocumentDetailPage = lazy(() => import('@/pages/documents/DocumentDetailPage'));
 const CreateDocumentPage = lazy(() => import('@/pages/documents/CreateDocumentPage'));
@@ -69,6 +74,30 @@ const routerConfig = [
         element: (
           <Wrap>
             <PerformancePage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'operational',
+        element: (
+          <Wrap>
+            <OperationalPage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'archive',
+        element: (
+          <Wrap>
+            <ArchivePage />
+          </Wrap>
+        ),
+      },
+      {
+        path: 'reports',
+        element: (
+          <Wrap>
+            <ReportsPage />
           </Wrap>
         ),
       },

@@ -22,9 +22,11 @@ import { isJuniorStaffOnly } from '@/utils/permissions';
 // Map route paths to human-readable breadcrumb labels
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:     'Dashboard',
-  reports:       'Executive report',
   performance:   'Performance tracking',
+  operational:   'Operational command centre',
   documents:     'Documents',
+  archive:       'Document archive',
+  reports:       'Reports',
   tasks:         'My Tasks',
   audit:         'Audit Log',
   notifications: 'Notifications',
@@ -52,8 +54,11 @@ function Breadcrumb() {
       {segments.map((seg, idx) => {
         const isLast = idx === segments.length - 1;
         const path = '/' + segments.slice(0, idx + 1).join('/');
-        const label = ROUTE_LABELS[seg]
-          ?? (UUID_RE.test(seg) ? resolveUsername(seg) || '#' + seg.slice(0, 6) : seg);
+        const label =
+          seg === 'reports' && segments[idx - 1] === 'dashboard'
+            ? 'Executive report'
+            : ROUTE_LABELS[seg] ??
+              (UUID_RE.test(seg) ? resolveUsername(seg) || '#' + seg.slice(0, 6) : seg);
 
         return (
           <span key={path} className="flex items-center gap-1.5">

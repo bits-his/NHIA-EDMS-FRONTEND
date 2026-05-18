@@ -112,6 +112,8 @@ export interface DocumentWorkflowAction {
   actor_role_description?: string | null;
   /** RBAC role machine name — last-resort fallback for the actor title. */
   actor_role_name?: string | null;
+  /** True when the actor has an e-signature on file (final approval stamp). */
+  actor_has_signature?: boolean | string | null;
 }
 
 export interface CreateDocumentRequest extends Partial<DocumentCreationProfile> {

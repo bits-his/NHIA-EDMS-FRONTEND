@@ -7,21 +7,20 @@ export interface PerformanceLeaderboardEntry {
   username: string | null;
   rank_label: string | null;
   department_name: string | null;
-  completed_count: number;
-  workflow_completions: number;
-  document_submissions: number;
-  owner_actions: number;
-  avg_hours_to_act: number;
-  median_hours_to_act: number | null;
-  on_time_count: number;
-  on_time_rate: number;
+  tasks_completed: number;
+  documents_initiated: number;
+  documents_approved: number;
+  total_contribution: number;
+  avg_task_hours: number | null;
+  median_task_hours: number | null;
+  avg_approval_hours: number | null;
   overdue_active: number;
 }
 
 export interface PerformanceTrendPoint {
   date: string;
-  completed: number;
-  avg_hours: number;
+  tasks_completed: number;
+  avg_task_hours: number;
 }
 
 export interface PerformanceAnalyticsResponse {
@@ -32,16 +31,14 @@ export interface PerformanceAnalyticsResponse {
   };
   generatedAt: string;
   period: { from: string; to: string };
-  slaDays: number;
   summary: {
     staffTracked: number;
     tasksCompleted: number;
-    submissionsCompleted: number;
-    ownerActionsCompleted: number;
-    totalActions: number;
-    avgHoursToAct: number | null;
-    medianHoursToAct: number | null;
-    onTimeRate: number;
+    documentsInitiated: number;
+    documentsApproved: number;
+    totalContributions: number;
+    avgTaskHours: number | null;
+    medianTaskHours: number | null;
     overdueActive: number;
   };
   leaderboard: PerformanceLeaderboardEntry[];

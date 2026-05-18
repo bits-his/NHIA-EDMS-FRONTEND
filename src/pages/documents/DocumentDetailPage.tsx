@@ -180,23 +180,6 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid && isInternalMemo && !!templateId,
   });
 
-  const { data: signatorySignatureObjectUrl } = useQuery({
-    queryKey: QUERY_KEYS.documentSignatorySignature(id!),
-    queryFn: async () => {
-      const blob = await documentsApi.getDocumentSignatorySignatureBlob(id!);
-      return URL.createObjectURL(blob);
-    },
-    enabled: documentIdValid && isInternalMemo && !!doc?.signatory_id,
-    retry: false,
-    throwOnError: false,
-  });
-
-  useEffect(() => {
-    return () => {
-      if (signatorySignatureObjectUrl) URL.revokeObjectURL(signatorySignatureObjectUrl);
-    };
-  }, [signatorySignatureObjectUrl]);
-
   const { data: myTasks } = useQuery({
     queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
     queryFn: () => tasksApi.list(user!.user_id),
@@ -759,18 +742,6 @@ export default function DocumentDetailPage() {
                             : bodyHtml,
                         }}
                       />
-                      {doc.signatory_id && signatorySignatureObjectUrl ? (
-                        <div className="border-t border-border/60 bg-background px-5 py-4">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                            Authorised signatory
-                          </p>
-                          <img
-                            src={signatorySignatureObjectUrl}
-                            alt="Signature"
-                            className="max-h-24 max-w-[280px] object-contain"
-                          />
-                        </div>
-                      ) : null}
                     </div>
                   ) : doc.category === 'external_correspondence' ? (
                     <p className="text-sm text-muted-foreground italic py-2">

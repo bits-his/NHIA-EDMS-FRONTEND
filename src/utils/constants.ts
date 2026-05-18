@@ -74,6 +74,12 @@ export const QUERY_KEYS = {
   executiveReport: (params: Record<string, string>) => ['executive', 'report', params] as const,
   executivePerformance: (params: Record<string, string>) =>
     ['executive', 'performance', params] as const,
+  operationalPersonal: (params: Record<string, string>) =>
+    ['operational', 'personal', params] as const,
+  operationalTeam: (params: Record<string, string>) =>
+    ['operational', 'team', params] as const,
+  archiveRegistry: (params: Record<string, string>) => ['registry', 'archive', params] as const,
+  reportsRegistry: (params: Record<string, string>) => ['registry', 'reports', params] as const,
   task: (id: string) => ['task', id],
   auditLogs: (query: object) => ['audit-logs', query],
   auditLogsMyTrail: (userId: string, limit: number) => ['audit-logs', 'my-trail', userId, limit] as const,
@@ -88,6 +94,8 @@ export const QUERY_KEYS = {
   documentsSearch: (filters: object) => ['documents-search', filters],
   documentWorkflowActions: (id: string) => ['document-workflow-actions', id],
   documentSignatorySignature: (id: string) => ['document-signatory-signature', id],
+  documentActorSignature: (documentId: string, actorUserId: string) =>
+    ['document-actor-signature', documentId, actorUserId] as const,
   documentDiscussions: (id: string) => ['document-discussions', id] as const,
   documentDiscussionEligible: (id: string) =>
     ['document-discussion-eligible', id] as const,
