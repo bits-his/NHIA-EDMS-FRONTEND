@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Toaster } from 'sonner';
 import { QueryProvider } from '@/providers/QueryProvider';
 import { ThemeProvider } from '@/providers/ThemeProvider';
 import { AppRouter } from '@/router';
@@ -48,6 +49,7 @@ export default function App() {
       <QueryProvider>
         <AuthGate>
           <AppRouter />
+          <Toaster richColors closeButton position="top-right" />
         </AuthGate>
       </QueryProvider>
     </ThemeProvider>

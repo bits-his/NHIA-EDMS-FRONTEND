@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { MessageSquare, Paperclip, Send, Upload, X } from 'lucide-react';
+import { AlertTriangle, MessageSquare, Paperclip, Send, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -15,6 +16,11 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { formatDateTime, formatRelative } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { normalizeWorkflowStepActionType } from '@/utils/permissions';
+import {
+  directMessageActionRequiresSignature,
+  ESIGNATURE_SETUP_MESSAGE,
+  userHasEsignatureOnFile,
+} from '@/utils/eSignature';
 import {
   buildRankFilterOptions,
   recipientUserLabel,
@@ -37,7 +43,12 @@ const ACTION_LABELS: Record<string, string> = {
 /** Shown in the thread even when `comment` is empty (workflow milestones). */
 const ACTIONS_VISIBLE_WITHOUT_COMMENT = new Set(['final_approve', 'final_approval']);
 
-const SIGNATURE_STAMP_ACTIONS = new Set(['final_approve', 'final_approval']);
+const SIGNATURE_STAMP_ACTIONS = new Set([
+  'final_approve',
+  'final_approval',
+  'approve_forward',
+  'approve_send',
+]);
 
 const ACTION_TONE: Record<string, string> = {
   reject: 'bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-900/20 dark:text-red-400 dark:ring-red-800',
@@ -71,16 +82,19 @@ type DmForwardActionType =
   | 'attach_send'
   | 'review_send'
   | 'approve_send'
+  | 'request_info'
   | 'final_approval';
 
 const FORWARD_ACTION_OPTIONS: { value: DmForwardActionType; label: string }[] = [
   { value: 'attach_send', label: 'Attach and send' },
   { value: 'review_send', label: 'Review and send' },
   { value: 'approve_send', label: 'Approve and send' },
-  { value: 'final_approval', label: 'Final approval (close & approve)' },
+  { value: 'request_info', label: 'Request more information' },
+  { value: 'final_approval', label: 'Final approval (archive & close)' },
 ];
 
 const DM_TERMINAL_ACTIONS: ReadonlySet<DmForwardActionType> = new Set(['final_approval']);
+const DM_REQUEST_INFO_ACTIONS: ReadonlySet<DmForwardActionType> = new Set(['request_info']);
 
 function actorDisplay(a: DocumentWorkflowAction): string {
   return a.actor_full_name?.trim() || a.actor_username?.trim() || resolveUsername(a.actor_id);
@@ -194,7 +208,13 @@ export function DocumentCommentsSection({
 
   const isTerminalAction =
     isDirectMessage && actionType !== '' && DM_TERMINAL_ACTIONS.has(actionType);
-  const isForward = isDirectMessage && actionType !== '' && !isTerminalAction;
+  const isRequestInfoAction =
+    isDirectMessage && actionType !== '' && DM_REQUEST_INFO_ACTIONS.has(actionType);
+  const isForward =
+    isDirectMessage &&
+    actionType !== '' &&
+    !isTerminalAction &&
+    !isRequestInfoAction;
   const normalizedWorkflowAction = normalizeWorkflowStepActionType(workflowStepActionType);
   const canSubmitWorkflowAction =
     isWorkflow && !!workflowInstanceId && canAdvanceWorkflow && !isDirectMessage;
@@ -208,7 +228,7 @@ export function DocumentCommentsSection({
           : 'Comment & workflow action';
   const workflowComposerTitle =
     normalizedWorkflowAction === 'final_approve'
-      ? 'Your comment will be saved and the document will receive final workflow approval.'
+      ? 'Your comment will be saved. Final approval archives this process (read-only) and closes the chain.'
       : normalizedWorkflowAction === 'approve' || normalizedWorkflowAction === 'approve_forward'
         ? 'Your comment will be saved and this workflow step will be approved.'
         : normalizedWorkflowAction === 'review'
@@ -250,6 +270,17 @@ export function DocumentCommentsSection({
     queryFn: () => authApi.listRoles(),
     enabled: canComment && isDirectMessage,
   });
+
+  const { data: myProfile, isLoading: myProfileLoading } = useQuery({
+    queryKey: QUERY_KEYS.userProfile(ownUserId ?? ''),
+    queryFn: () => authApi.getProfile(ownUserId!),
+    enabled: canComment && isDirectMessage && !!ownUserId,
+  });
+
+  const hasEsignature = userHasEsignatureOnFile(myProfile);
+  const dmNeedsSignature =
+    isDirectMessage && directMessageActionRequiresSignature(actionType);
+  const dmSignatureBlocked = dmNeedsSignature && (myProfileLoading || !hasEsignature);
 
   /**
    * Only exclude the current user (you can't forward to yourself). Previous
@@ -318,6 +349,14 @@ export function DocumentCommentsSection({
         await documentsApi.editForward(documentId, note);
         return workflowApi.advance(workflowInstanceId, note);
       }
+      if (input.actionType === 'request_info') {
+        const note = input.text.trim();
+        if (!note) throw new Error('Explain what information is needed.');
+        return documentsApi.requestInfo(documentId, note);
+      }
+      if (directMessageActionRequiresSignature(input.actionType) && !userHasEsignatureOnFile(myProfile)) {
+        throw new Error(ESIGNATURE_SETUP_MESSAGE);
+      }
       const dmForward =
         input.actionType === 'attach_send' ||
         input.actionType === 'review_send' ||
@@ -329,15 +368,20 @@ export function DocumentCommentsSection({
         dmForward ? input.nextUserId : undefined
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      const dmAction = variables.actionType;
       toast.success(
         canSubmitWorkflowAction
           ? 'Comment saved and workflow advanced'
-          : isTerminalAction
-            ? 'Document approved'
-            : isForward
-              ? 'Sent to next recipient'
-              : 'Comment posted'
+          : dmAction === 'request_info'
+            ? 'Returned to the sender for more information'
+            : dmAction === 'final_approval'
+              ? 'Final approval recorded — process archived and is now read-only'
+              : dmAction === 'approve_send' ||
+                  dmAction === 'attach_send' ||
+                  dmAction === 'review_send'
+                ? 'Sent to next recipient'
+                : 'Comment posted'
       );
       resetComposer();
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentWorkflowActions(documentId) });
@@ -369,6 +413,7 @@ export function DocumentCommentsSection({
 
   const allowSubmitContent = (() => {
     if (isDirectMessage) {
+      if (isRequestInfoAction) return trimmed.length > 0;
       return (
         dmActionChosen &&
         dmForwardReady &&
@@ -382,7 +427,8 @@ export function DocumentCommentsSection({
     return hasSubstance;
   })();
 
-  const canPost = canComment && allowSubmitContent && !submitMutation.isPending;
+  const canPost =
+    canComment && allowSubmitContent && !submitMutation.isPending && !dmSignatureBlocked;
 
   return (
     <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-comments">
@@ -415,6 +461,10 @@ export function DocumentCommentsSection({
                   value={actionType || undefined}
                   onValueChange={(v) => {
                     setActionType(v as DmForwardActionType);
+                    if (v === 'request_info') {
+                      setNextUserRank('');
+                      setNextUserId('');
+                    }
                   }}
                   disabled={submitMutation.isPending}
                 >
@@ -431,15 +481,43 @@ export function DocumentCommentsSection({
                 </Select>
               </div>
 
-              {isTerminalAction && (
+              {isRequestInfoAction && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/30">
+                  <p className="text-xs text-amber-950 dark:text-amber-100">
+                    The message is sent back to whoever forwarded it to you so they can update and
+                    resend.
+                  </p>
+                </div>
+              )}
+
+              {dmSignatureBlocked && (
+                <div
+                  className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 flex gap-2"
+                  role="alert"
+                >
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+                  <div className="text-xs text-destructive space-y-1">
+                    <p className="font-medium">E-signature required</p>
+                    <p>{ESIGNATURE_SETUP_MESSAGE}</p>
+                    <Link
+                      to="/settings"
+                      className="inline-block font-medium underline underline-offset-2 hover:opacity-90"
+                    >
+                      Open Settings → E-signature
+                    </Link>
+                  </div>
+                </div>
+              )}
+
+              {isTerminalAction && !dmSignatureBlocked && (
                 <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 dark:border-violet-800/60 dark:bg-violet-900/20">
                   <p className="text-xs font-medium text-violet-800 dark:text-violet-300">
                     Final approval closes this chain
                   </p>
                   <p className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-300/80">
-                    The document will be marked <span className="font-medium">approved</span>, your
-                    e-signature from Settings will be appended to the memo and shown here, and no
-                    further recipients can act on it.
+                    The process will become <span className="font-medium">read-only and archived</span>,
+                    your e-signature from Settings will be appended to the memo, and no further
+                    recipients can act on it.
                   </p>
                 </div>
               )}
@@ -514,7 +592,7 @@ export function DocumentCommentsSection({
                       </p>
                     )}
                     <p className="text-[11px] text-muted-foreground">
-                      They'll be added as a recipient and can comment or forward again.
+                      Approve and send appends your e-signature (Settings → E-signature) before forwarding.
                     </p>
                   </div>
                 </div>
@@ -526,6 +604,8 @@ export function DocumentCommentsSection({
             placeholder={
               isTerminalAction
                 ? 'Add a closing note (optional)…'
+                : isRequestInfoAction
+                  ? 'What information is needed…'
                 : isForward
                   ? 'Add a note for the next recipient (optional)…'
                   : isDirectMessage
@@ -585,6 +665,10 @@ export function DocumentCommentsSection({
               disabled={!canPost}
               loading={submitMutation.isPending}
               onClick={() => {
+                if (dmSignatureBlocked) {
+                  toast.error(ESIGNATURE_SETUP_MESSAGE);
+                  return;
+                }
                 if (!canPost) return;
                 submitMutation.mutate({
                   text: trimmed,
@@ -599,16 +683,26 @@ export function DocumentCommentsSection({
                 ? workflowSubmitLabel
                 : isDirectMessage && !actionType
                   ? 'Select action type'
-                  : isTerminalAction
-                    ? 'Final approve'
-                    : isForward
-                      ? 'Send'
-                      : 'Post comment'}
+                  : isRequestInfoAction
+                    ? 'Request info'
+                    : isTerminalAction
+                      ? 'Final approve'
+                      : isForward
+                        ? 'Send'
+                        : 'Post comment'}
             </Button>
           </div>
 
           {isDirectMessage && !actionType && (
             <p className="text-xs text-destructive">Select an action type to continue.</p>
+          )}
+          {isRequestInfoAction && !trimmed && (
+            <p className="text-xs text-destructive">A comment is required for request more information.</p>
+          )}
+          {dmSignatureBlocked && (
+            <p className="text-xs text-destructive">
+              Set up your e-signature in Settings before you can complete this action.
+            </p>
           )}
           {isForward && nextUserId === '' && (
             <p className="text-xs text-destructive">Pick the next user to forward to.</p>

@@ -22,7 +22,7 @@ import { correspondenceDirectionLabel } from '@/utils/correspondence';
 const ACTION_LABELS: Record<string, string> = {
   reject: 'Rejected',
   edit_forward: 'Note',
-  approve_forward: 'Approved & forwarded',
+  approve_forward: 'Approved & sent',
   request_info: 'Requested information',
   final_approve: 'Final approval',
   final_approval: 'Final approval',

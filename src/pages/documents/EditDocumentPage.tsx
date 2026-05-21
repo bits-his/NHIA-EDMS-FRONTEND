@@ -53,12 +53,14 @@ export default function EditDocumentPage() {
     queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
     queryFn: () => tasksApi.list(user!.user_id),
     enabled: !!user?.user_id && document?.status === 'pending',
+    refetchOnMount: 'always',
   });
 
   const { data: wfInstance } = useQuery({
     queryKey: QUERY_KEYS.workflowInstanceByDocument(id!),
     queryFn: () => workflowApi.getInstanceByDocumentId(id!),
     enabled: documentIdValid && document?.status === 'pending',
+    refetchOnMount: 'always',
   });
 
   const { data: wfTemplate } = useQuery({
@@ -125,13 +127,13 @@ export default function EditDocumentPage() {
     return (
       <div className="space-y-4">
         <Button variant="ghost" size="sm" onClick={() => navigate('/documents')}>
-          <ArrowLeft className="h-4 w-4" /> Documents
+          <ArrowLeft className="h-4 w-4" /> Process
         </Button>
         <ErrorState
           title="Invalid document link"
           error={
             new Error(
-              'This URL is not a valid document id. Use Documents in the sidebar to open a document.'
+              'This URL is not a valid process id. Use Process in the sidebar to open a case.'
             )
           }
         />
@@ -159,9 +161,10 @@ export default function EditDocumentPage() {
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            This document is in <strong>{document.status}</strong> status and cannot be edited with your current
-            access. Draft memos can be edited by the owner (or authorised roles). Pending memos can be edited only when
-            you have an active workflow task for the current step on this document.
+            This process is in <strong>{document.status}</strong> status and cannot be edited with your current
+            access. Draft memos can be edited by the owner (or authorised roles). When the workflow is returned to
+            you after a request for information, you need an active task on the current step — refresh the page if
+            you were just notified.
           </AlertDescription>
         </Alert>
       </div>

@@ -100,7 +100,7 @@ export function OrganisationPerformanceSection({
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: QUERY_KEYS.executivePerformance(queryParams),
-    queryFn: () => executiveApi.getPerformance(queryParams),
+    queryFn: () => executiveApi.getPerformance({ ...queryParams, limit: '50' }),
     staleTime: 30_000,
   });
 
@@ -140,9 +140,17 @@ export function OrganisationPerformanceSection({
         />
         <StatCard
           icon={Timer}
-          label="Median time on task"
-          value={isLoading ? '—' : formatHours(summary?.medianTaskHours ?? null)}
-          sub={isLoading ? undefined : `Avg ${formatHours(summary?.avgTaskHours ?? null)}`}
+          label="Median response time"
+          value={
+            isLoading
+              ? '—'
+              : formatHours(summary?.medianResponseHours ?? summary?.medianTaskHours ?? null)
+          }
+          sub={
+            isLoading
+              ? undefined
+              : `Avg ${formatHours(summary?.avgResponseHours ?? summary?.avgTaskHours ?? null)} (arrival → action)`
+          }
           loading={isLoading}
         />
         <StatCard
@@ -168,8 +176,8 @@ export function OrganisationPerformanceSection({
               Workflow contribution leaderboard
             </CardTitle>
             <p className="text-xs text-muted-foreground font-normal mt-1">
-              Ranked by completed tasks, documents initiated, and documents approved. Task time is
-              measured from assignment to completion on each linked document.
+              All staff who initiated, approved, completed workflow steps, or took any document
+              action in this period. Response time is from document arrival until they acted.
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -184,7 +192,7 @@ export function OrganisationPerformanceSection({
                 <EmptyState
                   icon={Clock}
                   title="No performance data yet"
-                  description="Data appears when staff complete workflow tasks, initiate documents, or approve documents in this period."
+                  description="Data appears when staff initiate documents, complete workflow steps, approve, forward, reject, or otherwise act on documents in this period."
                 />
               </div>
             ) : (
@@ -198,7 +206,8 @@ export function OrganisationPerformanceSection({
                       <th className="px-4 py-3 text-right">Tasks</th>
                       <th className="px-4 py-3 text-right hidden lg:table-cell">Initiated</th>
                       <th className="px-4 py-3 text-right hidden lg:table-cell">Approved</th>
-                      <th className="px-4 py-3 text-right">Avg task time</th>
+                      <th className="px-4 py-3 text-right">Avg response</th>
+                      <th className="px-4 py-3 text-right hidden xl:table-cell">Acted</th>
                       <th className="px-4 py-3 text-right hidden sm:table-cell">Overdue</th>
                     </tr>
                   </thead>
@@ -241,13 +250,17 @@ export function OrganisationPerformanceSection({
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className="font-mono font-medium text-foreground">
-                            {formatHours(row.avg_task_hours)}
+                            {formatHours(row.avg_response_hours ?? row.avg_task_hours)}
                           </span>
-                          {row.median_task_hours != null && (
+                          {(row.median_response_hours ?? row.median_task_hours) != null && (
                             <p className="text-[10px] text-muted-foreground">
-                              med {formatHours(row.median_task_hours)}
+                              med{' '}
+                              {formatHours(row.median_response_hours ?? row.median_task_hours)}
                             </p>
                           )}
+                        </td>
+                        <td className="px-4 py-3 text-right hidden xl:table-cell tabular-nums text-muted-foreground">
+                          {row.documents_acted ?? '—'}
                         </td>
                         <td className="px-4 py-3 text-right hidden sm:table-cell">
                           {row.overdue_active > 0 ? (

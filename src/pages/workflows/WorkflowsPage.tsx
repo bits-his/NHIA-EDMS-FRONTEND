@@ -29,17 +29,17 @@ import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { formatDate } from '@/utils/formatters';
 import { workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
+import { canCreateWorkflowTemplate } from '@/utils/permissions';
 
 type ViewMode = 'grid' | 'list';
 
 type EditorState = null | { mode: 'create' } | { mode: 'edit'; templateId: string };
 
-const CUSTOM_WORKFLOW_CREATOR_ROLES = new Set(['admin', 'director', 'submitter']);
-
 export default function WorkflowsPage() {
   const navigate = useNavigate();
   const roles = useAuthStore((s) => s.user?.roles) ?? [];
-  const canCreateCustomWorkflow = roles.some((r) => CUSTOM_WORKFLOW_CREATOR_ROLES.has(r));
+  const permissions = useAuthStore((s) => s.user?.permissions) ?? [];
+  const canCreateCustomWorkflow = canCreateWorkflowTemplate(roles, permissions);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<ViewMode>('grid');
   const [editor, setEditor] = useState<EditorState>(null);

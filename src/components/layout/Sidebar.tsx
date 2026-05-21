@@ -15,10 +15,11 @@ import {
   FileBarChart,
   type LucideIcon,
 } from 'lucide-react';
-import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
+import { AppBrand } from '@/components/brand/AppBrand';
 import { cn } from '@/utils/cn';
 import {
   canAccessTemplateManagement,
+  canCreateWorkflowTemplate,
   canAccessAuditLogModule,
   canManageUsers,
   canViewPerformanceNav,
@@ -40,11 +41,11 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', juniorVisible: true },
-  { to: '/documents', icon: FileText, label: 'Documents', juniorVisible: true },
+  { to: '/documents', icon: FileText, label: 'Process', juniorVisible: true },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/audit', icon: Shield, label: 'Audit log', requiresAuditAccess: true },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true, juniorVisible: true },
-  { to: '/search', icon: Search, label: 'Search & OCR' },
+  { to: '/search', icon: Search, label: 'Search & OCR', juniorVisible: true },
 ];
 
 const recordsNavItems: NavItem[] = [
@@ -69,7 +70,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const roles = user?.roles ?? [];
   const juniorOnly = isJuniorStaffOnly(roles);
   const showUserManagement = canManageUsers(roles);
-  const showTemplateMgmt = user?.roles ? canAccessTemplateManagement(user.roles) : false;
+  const perms = user?.permissions ?? [];
+  const showTemplateMgmt = canAccessTemplateManagement(user?.roles, perms);
+  const showWorkflowsNav = canCreateWorkflowTemplate(user?.roles, perms);
   const showAuditNav = canAccessAuditLogModule(user?.roles);
   const showPerformanceNav = canViewPerformanceNav(user?.roles, user?.permissions ?? []);
 
@@ -93,28 +96,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           collapsed ? 'justify-center px-0' : 'px-3'
         )}
       >
-        {collapsed ? (
-          /* Collapsed: monogram */
-          <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-white font-black text-sm">N</span>
-          </div>
-        ) : (
-          /* Expanded: actual logo on white pill */
-          <div className="bg-white rounded-lg px-2 py-1">
-            <img
-              src={NHIA_LOGO_SRC}
-              alt="NHIA Logo"
-              className="h-14 w-auto object-contain"
-            />
-          </div>
-        )}
+        <AppBrand variant={collapsed ? 'sidebar-collapsed' : 'sidebar'} />
       </div>
 
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1 scrollbar-none">
         {navItems
           .filter((item) => {
-            if (juniorOnly && !('juniorVisible' in item && item.juniorVisible)) return false;
+            if (juniorOnly && !('juniorVisible' in item && item.juniorVisible)) {
+              if (item.to === '/workflows' && showWorkflowsNav) return true;
+              return false;
+            }
+            if (item.to === '/workflows' && !showWorkflowsNav) return false;
             if ('requiresAuditAccess' in item && item.requiresAuditAccess && !showAuditNav) return false;
             return true;
           })

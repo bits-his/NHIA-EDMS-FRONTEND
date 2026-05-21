@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
-import { ProtectedRoute, PublicRoute, RoleGuard } from './guards';
+import { ProtectedRoute, PublicRoute, RoleGuard, TemplateManagementGuard } from './guards';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/shared/PageLoader';
 
@@ -220,9 +220,9 @@ const routerConfig = [
         path: 'template-management',
         element: (
           <Wrap>
-            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+            <TemplateManagementGuard fallback={<Navigate to="/dashboard" replace />}>
               <TemplateListPage />
-            </RoleGuard>
+            </TemplateManagementGuard>
           </Wrap>
         ),
       },
@@ -230,9 +230,9 @@ const routerConfig = [
         path: 'template-management/create',
         element: (
           <Wrap>
-            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+            <TemplateManagementGuard fallback={<Navigate to="/dashboard" replace />}>
               <CreateDocumentTemplatePage />
-            </RoleGuard>
+            </TemplateManagementGuard>
           </Wrap>
         ),
       },
@@ -240,9 +240,9 @@ const routerConfig = [
         path: 'template-management/edit/:templateId',
         element: (
           <Wrap>
-            <RoleGuard roles={['admin', 'submitter', 'director']} fallback={<Navigate to="/dashboard" replace />}>
+            <TemplateManagementGuard fallback={<Navigate to="/dashboard" replace />}>
               <CreateDocumentTemplatePage />
-            </RoleGuard>
+            </TemplateManagementGuard>
           </Wrap>
         ),
       },

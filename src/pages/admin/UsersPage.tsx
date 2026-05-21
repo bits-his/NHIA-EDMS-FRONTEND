@@ -6,8 +6,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import {
-  Users, Shield, Key, Plus, Trash2, RefreshCw,
-  UserPlus, Edit, CheckSquare, Activity, X, Check, Eye, Search,
+  Users, Shield, Key, Plus, RefreshCw,
+  UserPlus, Edit, CheckSquare, Activity, X, Check, Eye, Search, UserX, UserCheck,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -76,6 +76,10 @@ const ALL_PERMISSIONS = [
   'view_audit_logs',
   'manage_users',
   'manage_roles',
+  'create_template',
+  'manage_templates',
+  'create_workflow',
+  'assign_workflow',
 ] as const;
 
 const LEGACY_TO_CANON: Record<string, string> = {
@@ -112,10 +116,21 @@ const PERM_COLORS: Record<string, string> = {
   view_audit_logs: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-400',
   manage_users: 'bg-fuchsia-50 text-fuchsia-900 dark:bg-fuchsia-950/40 dark:text-fuchsia-400',
   manage_roles: 'bg-pink-50 text-pink-900 dark:bg-pink-950/40 dark:text-pink-400',
+  create_template: 'bg-cyan-50 text-cyan-900 dark:bg-cyan-950/40 dark:text-cyan-400',
+  manage_templates: 'bg-cyan-50 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300',
+  create_workflow: 'bg-lime-50 text-lime-900 dark:bg-lime-950/40 dark:text-lime-400',
+  assign_workflow: 'bg-lime-50 text-lime-800 dark:bg-lime-900/30 dark:text-lime-300',
 };
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const createUserSchema = z.object({
+  staff_id: z
+    .string()
+    .max(32, 'Max 32 characters')
+    .optional()
+    .refine((v) => !v?.trim() || /^[\w./-]+$/.test(v.trim()), {
+      message: 'Use letters, numbers, hyphens, underscores, or slashes only',
+    }),
   username:   z.string().min(2, 'At least 2 characters').max(50),
   email:      z.string().email('Valid email required'),
   full_name:  z.string().max(255),
@@ -424,7 +439,7 @@ function UsersTable({
   onEditProfile,
   onManageRoles,
   onResetPassword,
-  onDeactivate,
+  onAccountAction,
   onViewAudit,
   onViewDetails,
 }: {
@@ -435,7 +450,7 @@ function UsersTable({
   onEditProfile: (u: UserRecord) => void;
   onManageRoles: (u: UserRecord) => void;
   onResetPassword: (u: UserRecord) => void;
-  onDeactivate: (u: UserRecord) => void;
+  onAccountAction: (u: UserRecord, action: 'activate' | 'deactivate') => void;
   onViewAudit: () => void;
   onViewDetails: (u: UserRecord) => void;
 }) {
@@ -561,15 +576,27 @@ function UsersTable({
                         <Button variant="ghost" size="icon-sm" title="Reset password" onClick={() => onResetPassword(u)}>
                           <RefreshCw className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="Deactivate user"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => onDeactivate(u)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {isActiveUser(u) ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Deactivate user"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => onAccountAction(u, 'deactivate')}
+                          >
+                            <UserX className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Activate user"
+                            className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10"
+                            onClick={() => onAccountAction(u, 'activate')}
+                          >
+                            <UserCheck className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </>
                     )}
                     {canViewAuditNav && (
@@ -601,7 +628,7 @@ export default function UsersPage() {
   const [createUserOpen,    setCreateUserOpen]    = useState(false);
   const [createRoleOpen,    setCreateRoleOpen]     = useState(false);
   const [resetPwUser,       setResetPwUser]        = useState<UserRecord | null>(null);
-  const [deactivateUser,    setDeactivateUser]     = useState<UserRecord | null>(null);
+  const [accountAction,     setAccountAction]      = useState<{ user: UserRecord; action: 'activate' | 'deactivate' } | null>(null);
   const [manageRolesUser,   setManageRolesUser]    = useState<UserRecord | null>(null);
   const [editProfileUser,   setEditProfileUser]    = useState<UserRecord | null>(null);
   const [viewUser,          setViewUser]           = useState<UserRecord | null>(null);
@@ -654,12 +681,13 @@ export default function UsersPage() {
   );
 
   // ── Mutations ──
-  const deactivateMutation = useMutation({
-    mutationFn: (userId: string) => authApi.deactivateUser(userId),
-    onSuccess: (_, userId) => {
-      toast.success('User deactivated');
+  const accountMutation = useMutation({
+    mutationFn: ({ userId, action }: { userId: string; action: 'activate' | 'deactivate' }) =>
+      action === 'activate' ? authApi.activateUser(userId) : authApi.deactivateUser(userId),
+    onSuccess: (_, { action }) => {
+      toast.success(action === 'activate' ? 'User activated' : 'User deactivated');
       qc.invalidateQueries({ queryKey: ['admin-users'] });
-      setDeactivateUser(null);
+      setAccountAction(null);
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -795,7 +823,7 @@ export default function UsersPage() {
                   onEditProfile={setEditProfileUser}
                   onManageRoles={setManageRolesUser}
                   onResetPassword={setResetPwUser}
-                  onDeactivate={setDeactivateUser}
+                  onAccountAction={(u, action) => setAccountAction({ user: u, action })}
                   onViewAudit={() => navigate('/audit')}
                   onViewDetails={setViewUser}
                 />
@@ -814,33 +842,27 @@ export default function UsersPage() {
                   ))}
                 </div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[11rem] min-w-[11rem]">
                         Role
                       </th>
                       {ALL_PERMISSIONS.map((p) => (
                         <th
                           key={p}
-                          className="text-center px-2 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide max-w-[5rem] leading-tight"
+                          className="text-center px-1.5 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-[4.25rem] leading-tight"
                         >
                           {p.replace(/_/g, ' ')}
                         </th>
                       ))}
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Assigned to
-                      </th>
-                      <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[8.5rem]">
                         {canManageRoles ? 'Actions' : ''}
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {(allRoles ?? []).map((role, idx) => {
-                      const assignedUsers = (users ?? []).filter((u) =>
-                        u.roles.some((r) => r.id === role.id)
-                      );
                       return (
                         <tr
                           key={role.id}
@@ -849,18 +871,19 @@ export default function UsersPage() {
                             idx % 2 !== 0 && 'bg-muted/20'
                           )}
                         >
-                          <td className="px-5 py-3.5">
+                          <td className="px-4 py-3.5 align-top w-[11rem] min-w-[11rem]">
                             <span
                               className={cn(
-                                'text-xs font-semibold px-2.5 py-1 rounded-full capitalize',
+                                'inline-block text-xs font-semibold px-2.5 py-1 rounded-full capitalize max-w-full truncate',
                                 ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground'
                               )}
+                              title={roleDisplayLabel(role)}
                             >
                               {roleDisplayLabel(role)}
                             </span>
                           </td>
                           {ALL_PERMISSIONS.map((p) => (
-                            <td key={p} className="text-center px-4 py-3.5">
+                            <td key={p} className="text-center px-1.5 py-3.5 w-[4.25rem]">
                               {permissionHas(role.permissions ?? [], p) ? (
                                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">
                                   ✓
@@ -872,23 +895,7 @@ export default function UsersPage() {
                               )}
                             </td>
                           ))}
-                          <td className="px-5 py-3.5">
-                            <div className="flex gap-1.5 flex-wrap">
-                              {assignedUsers.length > 0 ? (
-                                assignedUsers.map((u) => (
-                                  <span
-                                    key={u.id}
-                                    className="text-xs font-medium bg-muted px-2 py-0.5 rounded-full capitalize"
-                                  >
-                                    {u.username}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Unassigned</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-5 py-3.5 text-right">
+                          <td className="px-4 py-3.5 text-right align-top w-[8.5rem]">
                             {canManageRoles ? (
                               <Button size="sm" variant="outline" onClick={() => setEditPermRole(role)}>
                                 <Edit className="h-3.5 w-3.5" />
@@ -964,14 +971,25 @@ export default function UsersPage() {
         />
       )}
       <ConfirmDialog
-        open={!!deactivateUser}
-        onOpenChange={(o) => !o && setDeactivateUser(null)}
-        title={`Deactivate ${deactivateUser?.username}?`}
-        description="This will permanently remove the user and all their role assignments. This action cannot be undone."
-        confirmLabel="Deactivate"
-        variant="destructive"
-        onConfirm={() => deactivateUser && deactivateMutation.mutate(deactivateUser.id)}
-        loading={deactivateMutation.isPending}
+        open={!!accountAction}
+        onOpenChange={(o) => !o && setAccountAction(null)}
+        title={
+          accountAction?.action === 'activate'
+            ? `Activate ${accountAction.user.username}?`
+            : `Deactivate ${accountAction?.user.username}?`
+        }
+        description={
+          accountAction?.action === 'activate'
+            ? 'The user will be able to sign in again. Role assignments are unchanged.'
+            : 'The account will be marked inactive and cannot sign in. Data and role assignments are kept.'
+        }
+        confirmLabel={accountAction?.action === 'activate' ? 'Activate' : 'Deactivate'}
+        variant={accountAction?.action === 'activate' ? 'default' : 'destructive'}
+        onConfirm={() =>
+          accountAction &&
+          accountMutation.mutate({ userId: accountAction.user.id, action: accountAction.action })
+        }
+        loading={accountMutation.isPending}
       />
     </div>
   );
@@ -992,6 +1010,7 @@ function CreateUserDialog({
   const { register, handleSubmit, reset, control, setValue, formState: { errors } } = useForm<CreateUserForm>({
     resolver: zodResolver(createUserSchema),
     defaultValues: {
+      staff_id: '',
       full_name: '',
       phone: '',
       rank: '',
@@ -1037,14 +1056,15 @@ function CreateUserDialog({
 
   const mutation = useMutation({
     mutationFn: (data: CreateUserForm) => {
-      const pick = (s: string) => {
-        const v = s.trim();
+      const pick = (s: string | undefined) => {
+        const v = (s ?? '').trim();
         return v.length > 0 ? v : undefined;
       };
       return authApi.createUser({
         username: data.username.trim(),
         email: data.email.trim(),
         password: data.password,
+        staff_id: pick(data.staff_id),
         full_name: pick(data.full_name),
         phone: pick(data.phone),
         rank: pick(data.rank),
@@ -1065,34 +1085,51 @@ function CreateUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5" /> Create New User</DialogTitle>
-          <DialogDescription>Add a new user to the system. They can log in immediately with the provided credentials.</DialogDescription>
+         
         </DialogHeader>
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="flex flex-col min-h-0">
-          <div className="space-y-4 px-6 overflow-y-auto pb-4">
-            <div className="space-y-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 px-6 overflow-y-auto pb-4">
+            <div className="space-y-1 min-w-0">
+              <Label htmlFor="cu-staff_id">Staff ID</Label>
+              <Input
+                id="cu-staff_id"
+                placeholder="Auto if blank"
+                error={!!errors.staff_id}
+                {...register('staff_id')}
+              />
+              {errors.staff_id && (
+                <p className="text-xs text-destructive">{errors.staff_id.message}</p>
+              )}
+            </div>
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="cu-username">Username</Label>
               <Input id="cu-username" placeholder="e.g. john" error={!!errors.username} {...register('username')} />
               {errors.username && <p className="text-xs text-destructive">{errors.username.message}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="cu-email">Email</Label>
               <Input id="cu-email" type="email" placeholder="john@example.com" error={!!errors.email} {...register('email')} />
               {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1 min-w-0">
+              <Label htmlFor="cu-password">Password</Label>
+              <Input id="cu-password" type="password" placeholder="Min. 6 characters" error={!!errors.password} {...register('password')} />
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            </div>
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="cu-full_name">Full name</Label>
-              <Input id="cu-full_name" placeholder="Legal name as on record" error={!!errors.full_name} {...register('full_name')} />
+              <Input id="cu-full_name" placeholder="Legal name" error={!!errors.full_name} {...register('full_name')} />
               {errors.full_name && <p className="text-xs text-destructive">{errors.full_name.message}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1 min-w-0">
               <Label htmlFor="cu-phone">Phone</Label>
               <Input id="cu-phone" type="tel" placeholder="+234 …" error={!!errors.phone} {...register('phone')} />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1 min-w-0 sm:col-span-2">
                 <Label htmlFor="cu-rank">Rank</Label>
                 <Controller
                   name="rank"
@@ -1130,8 +1167,7 @@ function CreateUserDialog({
                 />
                 {errors.rank && <p className="text-xs text-destructive">{errors.rank.message}</p>}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1 min-w-0">
                 <Label htmlFor="cu-department">Department</Label>
                 <Controller
                   name="department"
@@ -1164,7 +1200,7 @@ function CreateUserDialog({
                 />
                 {errors.department && <p className="text-xs text-destructive">{errors.department.message}</p>}
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1 min-w-0">
                 <Label htmlFor="cu-unit">Unit</Label>
                 <Controller
                   name="unit"
@@ -1205,9 +1241,7 @@ function CreateUserDialog({
                 />
                 {errors.unit && <p className="text-xs text-destructive">{errors.unit.message}</p>}
               </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1 min-w-0">
                 <Label htmlFor="cu-zone">Zone</Label>
                 <Controller
                   name="zone"
@@ -1240,7 +1274,7 @@ function CreateUserDialog({
                 />
                 {errors.zone && <p className="text-xs text-destructive">{errors.zone.message}</p>}
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1 min-w-0">
                 <Label htmlFor="cu-state">State</Label>
                 <Controller
                   name="state"
@@ -1278,12 +1312,6 @@ function CreateUserDialog({
                 />
                 {errors.state && <p className="text-xs text-destructive">{errors.state.message}</p>}
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cu-password">Password</Label>
-              <Input id="cu-password" type="password" placeholder="Min. 6 characters" error={!!errors.password} {...register('password')} />
-              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
-            </div>
           </div>
           <DialogFooter className="px-6 py-4 border-t border-border bg-muted/20 shrink-0">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

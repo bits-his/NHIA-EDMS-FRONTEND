@@ -383,11 +383,11 @@ export default function DocumentsPage() {
             </div>
             <div className="sm:col-span-1 lg:col-span-2">
               <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Lifecycle
+                Process status
               </label>
               <Select value={bucket} onValueChange={(v) => setBucket(v as DocumentBucket)}>
                 <SelectTrigger className="h-10 bg-background">
-                  <SelectValue placeholder="Lifecycle" />
+                  <SelectValue placeholder="Process status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All ({bucketCounts.all})</SelectItem>
@@ -472,13 +472,13 @@ export default function DocumentsPage() {
               <thead>
                 <tr className="border-b border-border/80 bg-muted/40">
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Document
+                    Process
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[112px] min-w-[112px]">
                     Type
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[150px] min-w-[150px]">
-                    Status
+                    Process status
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[160px] min-w-[160px]">
                     Reference
@@ -526,20 +526,20 @@ export default function DocumentsPage() {
                 : bucket === 'action'
                   ? 'Nothing needs your action'
                   : bucket === 'completed'
-                    ? 'No completed documents yet'
-                    : 'No matching documents'
-              : 'No documents yet'
+                    ? 'No completed processes yet'
+                    : 'No matching processes'
+              : 'No processes yet'
           }
           description={
             bucket === 'drafts'
-              ? 'Drafts you create or have been returned to you will appear here.'
+              ? 'Draft processes you start or that are returned to you will appear here.'
               : bucket === 'action'
-                ? 'You are all caught up. Pending documents that need your input will land here.'
+                ? 'You are all caught up. In-progress processes that need your input will land here.'
                 : bucket === 'completed'
-                  ? 'Approved and rejected documents you participated in will appear here. Filed records are in Document archive.'
+                  ? 'Completed and rejected processes you participated in will appear here. Filed records are in the archive.'
                   : hasFilters
                     ? 'Try adjusting your search or filters'
-                    : 'Start your first process to get a document in the list'
+                    : 'Start your first process to see it in this list'
           }
           action={
             canCreateDocument(user?.roles ?? [], user?.permissions ?? []) &&
@@ -574,13 +574,13 @@ export default function DocumentsPage() {
               <thead>
                 <tr className="border-b border-border/80 bg-muted/40">
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Document
+                    Process
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[112px] min-w-[112px]">
                     Type
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[150px] min-w-[150px]">
-                    Status
+                    Process status
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[160px] min-w-[160px]">
                     Reference

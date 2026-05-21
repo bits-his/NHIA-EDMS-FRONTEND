@@ -77,6 +77,7 @@ export const authApi = {
     username: string;
     email: string;
     password: string;
+    staff_id?: string;
     full_name?: string;
     phone?: string;
     rank?: string;
@@ -114,6 +115,11 @@ export const authApi = {
 
   deactivateUser: async (userId: string): Promise<{ message: string }> => {
     const res = await authClient.delete<{ message: string }>(`/auth/users/${userId}`);
+    return res.data;
+  },
+
+  activateUser: async (userId: string): Promise<{ message: string }> => {
+    const res = await authClient.post<{ message: string }>(`/auth/users/${userId}/activate`);
     return res.data;
   },
 

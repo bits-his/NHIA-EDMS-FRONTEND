@@ -1,14 +1,10 @@
-import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
+import { AppBrand } from '@/components/brand/AppBrand';
 
 export function PageLoader() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-5">
-        <img
-          src={NHIA_LOGO_SRC}
-          alt="NHIA"
-          className="h-10 w-auto object-contain opacity-80"
-        />
+      <div className="flex flex-col items-center gap-6">
+        <AppBrand variant="loader" />
         <div className="relative h-10 w-10">
           <div className="absolute inset-0 rounded-full border-4 border-border" />
           <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
