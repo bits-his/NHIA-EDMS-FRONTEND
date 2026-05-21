@@ -738,7 +738,12 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
       </div>
 
       <DashboardAuditActivityCard
-        title={canRecentAudit ? 'System activity' : 'Your audit trail'}
+        title="Activity log"
+        description={
+          canRecentAudit
+            ? 'Latest document and workflow events across the organisation.'
+            : 'Your recent actions on documents and tasks.'
+        }
         logs={recentAudit ?? []}
         loading={auditLoading}
         limit={10}
@@ -915,7 +920,8 @@ function OfficerDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
           <DashboardAuditActivityCard
-            title="Recent activity"
+            title="Activity log"
+            description="Your recent document and task actions."
             logs={activityFeed}
             loading={loading}
             limit={12}
@@ -1239,7 +1245,8 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
       </div>
 
       <DashboardAuditActivityCard
-        title="Recent activity"
+        title="Activity log"
+        description="Your recent document and task actions."
         logs={activityFeed}
         loading={auditLoading || myDocsLoading || tasksLoading}
         limit={12}

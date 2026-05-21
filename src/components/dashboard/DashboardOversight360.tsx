@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Skeleton } from '@/components/shared/Skeleton';
-import { AuditTimeline } from '@/components/audit/AuditTimeline';
+import { DashboardAuditActivityCard } from '@/components/dashboard/DashboardAuditActivityCard';
 import {
   DashboardAlertsBanner,
   DashboardExecutiveSummary,
@@ -295,23 +295,20 @@ export function DashboardOversight360() {
       </div>
 
       {canRecentAudit ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between py-3">
-            <CardTitle className="text-sm font-semibold">Recent system activity</CardTitle>
-            {showAuditLogPage ? (
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => navigate('/audit')}>
-                Full log
-              </Button>
-            ) : null}
-          </CardHeader>
-          <CardContent>
-            <AuditTimeline
-              logs={(recentAudit ?? []).slice(0, 8)}
-              loading={auditLoading}
-              compact
-            />
-          </CardContent>
-        </Card>
+        <>
+          <DashboardSectionLabel>Compliance</DashboardSectionLabel>
+          <DashboardAuditActivityCard
+            title="Activity log"
+            description="Latest document and workflow events across your authorised scope."
+            logs={recentAudit ?? []}
+            loading={auditLoading}
+            limit={10}
+            showFullAuditLink={showAuditLogPage}
+            onOpenFullAudit={showAuditLogPage ? () => navigate('/audit') : undefined}
+            emptyTitle="No audit events"
+            emptyDescription="Activity will appear here as users work on documents and tasks."
+          />
+        </>
       ) : null}
 
       {unreadCount > 0 ? (

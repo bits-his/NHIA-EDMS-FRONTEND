@@ -57,7 +57,7 @@ const formSchema = z
     correspondence_direction: correspondenceDirectionSchema.optional(),
     action: actionSchema,
     /** To / CC / BCC tags applied at creation (workflow, direct message, or external). */
-    tagged_recipients: z.array(recipientTagSchema).default([]),
+    tagged_recipients: z.array(recipientTagSchema),
     /** Workflow engine template (GET /workflows/templates); used when delivery is workflow + submit. */
     workflow_template_id: z.string().optional(),
   })
@@ -97,7 +97,8 @@ const formSchema = z
     }
   });
 
-type CreateFormValues = z.infer<typeof formSchema>;
+type CreateFormInput = z.input<typeof formSchema>;
+type CreateFormValues = z.output<typeof formSchema>;
 
 function priorityToUrgency(p: CreateFormValues['document_priority']): DocumentUrgency {
   switch (p) {
@@ -181,7 +182,7 @@ export default function CreateDocumentPage() {
     queryFn: () => authApi.listRoles(),
   });
 
-  const form = useForm<CreateFormValues>({
+  const form = useForm<CreateFormInput, unknown, CreateFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       delivery_mode: 'workflow',

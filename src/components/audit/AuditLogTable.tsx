@@ -46,6 +46,10 @@ interface AuditLogTableProps {
   loading?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Tighter rows for dashboard embeds */
+  dense?: boolean;
+  /** Omit outer border when nested inside a card */
+  embedded?: boolean;
 }
 
 export function AuditLogTable({
@@ -53,6 +57,8 @@ export function AuditLogTable({
   loading,
   emptyTitle = 'No activity',
   emptyDescription = 'Nothing matches your filters yet.',
+  dense = false,
+  embedded = false,
 }: AuditLogTableProps) {
   const [selected, setSelected] = useState<AuditLog | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -88,8 +94,16 @@ export function AuditLogTable({
 
   return (
     <>
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-sm table-fixed min-w-[48rem]">
+      <div
+        className={cn(
+          'overflow-x-auto',
+          !embedded && 'rounded-lg border border-border',
+          embedded && 'border-t border-border/60'
+        )}
+      >
+        <table
+          className={cn('w-full text-sm table-fixed', dense ? 'min-w-[44rem]' : 'min-w-[48rem]')}
+        >
           <colgroup>
             <col className="w-[9.5rem]" />
             <col className="w-[6.25rem]" />
@@ -100,22 +114,52 @@ export function AuditLogTable({
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-muted/40 text-left">
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 When
               </th>
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 Action
               </th>
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 Staff
               </th>
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 Document
               </th>
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 What happened
               </th>
-              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground text-right">
+              <th
+                className={cn(
+                  'px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground text-right',
+                  dense ? 'py-2' : 'py-2.5'
+                )}
+              >
                 <span className="sr-only">Details</span>
               </th>
             </tr>
@@ -135,15 +179,28 @@ export function AuditLogTable({
                   )}
                   onClick={() => openDetail(log)}
                 >
-                  <td className="px-3 py-2.5 align-middle text-xs text-muted-foreground whitespace-nowrap max-w-0">
-                    <p className="font-medium text-foreground/90 truncate">
+                  <td
+                    className={cn(
+                      'px-3 align-middle text-xs text-muted-foreground whitespace-nowrap max-w-0',
+                      dense ? 'py-2' : 'py-2.5'
+                    )}
+                  >
+                    <p
+                      className="font-medium text-foreground/90 truncate"
+                      title={formatDateTime(log.created_at)}
+                    >
                       {formatRelative(log.created_at)}
                     </p>
-                    <p className="text-[10px] mt-0.5 truncate" title={formatDateTime(log.created_at)}>
-                      {formatDateTime(log.created_at)}
-                    </p>
+                    {!dense ? (
+                      <p
+                        className="text-[10px] mt-0.5 truncate"
+                        title={formatDateTime(log.created_at)}
+                      >
+                        {formatDateTime(log.created_at)}
+                      </p>
+                    ) : null}
                   </td>
-                  <td className="px-3 py-2.5 align-middle max-w-0">
+                  <td className={cn('px-3 align-middle max-w-0', dense ? 'py-2' : 'py-2.5')}>
                     <Badge
                       variant={badge.variant}
                       className="text-[10px] font-semibold uppercase max-w-full truncate"
@@ -152,25 +209,28 @@ export function AuditLogTable({
                       {badge.label}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2.5 align-middle max-w-0">
+                  <td className={cn('px-3 align-middle max-w-0', dense ? 'py-2' : 'py-2.5')}>
                     <AuditTableTextCell primary={staff.primary} secondary={staff.secondary} />
                   </td>
-                  <td className="px-3 py-2.5 align-middle max-w-0">
+                  <td className={cn('px-3 align-middle max-w-0', dense ? 'py-2' : 'py-2.5')}>
                     <AuditTableTextCell
                       primary={doc.primary}
                       secondary={doc.secondary}
                       secondaryMono
                     />
                   </td>
-                  <td className="px-3 py-2.5 align-middle max-w-0">
+                  <td className={cn('px-3 align-middle max-w-0', dense ? 'py-2' : 'py-2.5')}>
                     <p
-                      className="text-xs text-muted-foreground leading-snug line-clamp-2 break-words"
+                      className={cn(
+                        'text-muted-foreground leading-snug line-clamp-2 break-words',
+                        dense ? 'text-[11px]' : 'text-xs'
+                      )}
                       title={summary}
                     >
                       {summary}
                     </p>
                   </td>
-                  <td className="px-3 py-2.5 align-middle text-right">
+                  <td className={cn('px-3 align-middle text-right', dense ? 'py-2' : 'py-2.5')}>
                     <Button
                       type="button"
                       variant="ghost"
