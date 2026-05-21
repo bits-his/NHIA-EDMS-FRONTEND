@@ -37,6 +37,7 @@ import { formatRelative, isTaskOverdue } from '@/utils/formatters';
 import {
   canCreateDocument,
   canViewOperationalOverview,
+  canViewReportsNav,
   canAccessTemplateManagement,
   showOfficerHomeDashboard,
   canDirectorToggleOperationalDashboard,
@@ -415,7 +416,7 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
               Performance
             </Button>
             <Button variant="outline" size="sm" onClick={() => navigate('/documents')}>
-              Documents
+              Process
             </Button>
           </div>
         }
@@ -764,6 +765,7 @@ function OfficerDashboard() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const showAuditLogPage = canAccessAuditLogModule(user?.roles);
   const showPersonalPerformance = canAccessPersonalPerformancePage(user?.roles ?? []);
+  const showReportsNav = canViewReportsNav(user?.roles);
 
   const { data: recentAudit, isLoading: auditLoading } = useQuery({
     queryKey: ['audit-recent', user?.user_id],
@@ -818,7 +820,7 @@ function OfficerDashboard() {
 
   const stats = [
     {
-      label: 'Documents created',
+      label: 'Processes started',
       value: totalCreated,
       sub: 'you own',
       icon: FileText,
@@ -873,11 +875,13 @@ function OfficerDashboard() {
                 <Activity className="h-4 w-4" /> Performance
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
-              <BarChart3 className="h-4 w-4" /> Reports
-            </Button>
+            {showReportsNav && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
+                <BarChart3 className="h-4 w-4" /> Reports
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
-              <Search className="h-4 w-4" /> Search
+              <Search className="h-4 w-4" /> Search & OCR
             </Button>
             {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
               <Button size="sm" onClick={() => navigate('/documents/new')}>
@@ -976,9 +980,9 @@ function OfficerDashboard() {
             </CardHeader>
             <CardContent className="space-y-1">
               {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
-                <QuickAction icon={Plus} label="Create document" path="/documents/new" navigate={navigate} />
+                <QuickAction icon={Plus} label="Start process" path="/documents/new" navigate={navigate} />
               )}
-              <QuickAction icon={FileText} label="My documents" path="/documents" navigate={navigate} />
+              <QuickAction icon={FileText} label="My processes" path="/documents" navigate={navigate} />
               <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
               <QuickAction icon={Search} label="Search & OCR" path="/search" navigate={navigate} />
             </CardContent>
@@ -1036,6 +1040,7 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const showAuditLogPage = canAccessAuditLogModule(user?.roles);
+  const showReportsNav = canViewReportsNav(user?.roles);
 
   const { data: myTasks, isLoading: tasksLoading } = useQuery({
     queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
@@ -1127,11 +1132,13 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
                 <Activity className="h-4 w-4" /> Performance
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
-              <BarChart3 className="h-4 w-4" /> Reports
-            </Button>
+            {showReportsNav && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/reports')}>
+                <BarChart3 className="h-4 w-4" /> Reports
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => navigate('/search')}>
-              <Search className="h-4 w-4" /> Search
+              <Search className="h-4 w-4" /> Search & OCR
             </Button>
             {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && (
               <Button size="sm" onClick={() => navigate('/documents/new')}>
@@ -1213,8 +1220,8 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
           <Card>
             <CardHeader><CardTitle className="text-base">Quick Actions</CardTitle></CardHeader>
             <CardContent className="space-y-1">
-              {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && <QuickAction icon={Plus} label="Create Document" path="/documents/new" navigate={navigate} />}
-              <QuickAction icon={FileText}  label="Browse Documents" path="/documents"  navigate={navigate} />
+              {canCreateDocument(user?.roles ?? [], user?.permissions ?? []) && <QuickAction icon={Plus} label="Start process" path="/documents/new" navigate={navigate} />}
+              <QuickAction icon={FileText}  label="Browse process" path="/documents"  navigate={navigate} />
               <QuickAction icon={Layers} label="Template catalogue" path="/template-management" navigate={navigate} />
               <QuickAction icon={Search}    label="Search & OCR"     path="/search"     navigate={navigate} />
             </CardContent>

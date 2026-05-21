@@ -61,14 +61,14 @@ export function getDocumentActions(
 
   if (isDmRecipient) {
     return {
-      canEdit: false,
+      canEdit: true,
       canSubmit: false,
       canFinalApprove: false,
       canReject: true,
       canArchive: false,
       canEditForward: true,
       canApproveForward: false,
-      canRequestInfo: true,
+      canRequestInfo: false,
     };
   }
 
@@ -96,6 +96,9 @@ export function getDocumentActions(
   const pendingMyStep = status === 'pending' && hasActiveWorkflowTask;
   const canEditPendingMemo = pendingMyStep;
 
+  /** Request more information is allowed at every workflow step when it is the user's turn. */
+  const workflowRequestInfo = pendingMyStep;
+
   const base = {
     canEdit: (status === 'draft' && canEditDraftBody) || canEditPendingMemo,
     canSubmit: status === 'draft' && canSubmitDraft,
@@ -107,7 +110,7 @@ export function getDocumentActions(
     /** Active step assignees may post a free-form comment on the document (no status change). */
     canEditForward: pendingMyStep,
     canApproveForward: pendingMyStep,
-    canRequestInfo: pendingMyStep,
+    canRequestInfo: workflowRequestInfo,
   };
 
   if (!pendingMyStep || workflowStepActionType == null || String(workflowStepActionType).trim() === '') {
@@ -123,6 +126,8 @@ export function getDocumentActions(
         ...base,
         canEdit: false,
         canApproveForward: false,
+        canRequestInfo: workflowRequestInfo,
+        canReject: pendingMyStep,
       };
     case 'review':
       // Forward-only step (no approve-forward / final approve here, but free-form comment is fine).
@@ -130,15 +135,23 @@ export function getDocumentActions(
         ...base,
         canApproveForward: false,
         canFinalApprove: false,
+        canRequestInfo: workflowRequestInfo,
+        canReject: pendingMyStep,
       };
     case 'approve':
     case 'approve_forward':
       return {
         ...base,
         canFinalApprove: false,
+        canRequestInfo: workflowRequestInfo,
+        canReject: pendingMyStep,
       };
     default:
-      return base;
+      return {
+        ...base,
+        canRequestInfo: workflowRequestInfo,
+        canReject: pendingMyStep,
+      };
   }
 }
 
@@ -155,7 +168,11 @@ export function isJuniorStaffOnly(roles: string[]): boolean {
 }
 
 /** Routes junior staff may open (direct URL or sidebar). */
-export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
+export function isRouteAllowedForJuniorStaff(
+  pathname: string,
+  roles: string[] = [],
+  permissions: string[] = []
+): boolean {
   if (pathname === '/dashboard') return true;
   if (pathname === '/notifications' || pathname.startsWith('/notifications/')) return true;
   if (pathname === '/documents' || pathname.startsWith('/documents/')) return true;
@@ -163,7 +180,25 @@ export function isRouteAllowedForJuniorStaff(pathname: string): boolean {
   if (pathname === '/performance' || pathname.startsWith('/performance')) return true;
   if (pathname === '/archive' || pathname.startsWith('/archive')) return true;
   if (pathname === '/settings' || pathname.startsWith('/settings/')) return true;
+  if (pathname === '/search' || pathname.startsWith('/search/')) return true;
+  if (
+    (pathname === '/workflows' || pathname.startsWith('/workflows/')) &&
+    canCreateWorkflowTemplate(roles, permissions)
+  ) {
+    return true;
+  }
+  if (
+    (pathname === '/template-management' || pathname.startsWith('/template-management/')) &&
+    canAccessTemplateManagement(roles, permissions)
+  ) {
+    return true;
+  }
   return false;
+}
+
+/** Reports hub (sidebar Records › Reports) — not for officer / senior_officer only roles. */
+export function canViewReportsNav(roles: string[] | undefined | null): boolean {
+  return !isJuniorStaffOnly(roles ?? []);
 }
 
 /** Any signed-in user may open `/performance` (personal and/or organisation content). */
@@ -325,9 +360,35 @@ export function canIndexSearch(roles: string[]): boolean {
   return roles.includes('admin');
 }
 
-/** Enterprise template builder — administrators & records / submission roles. */
-export function canAccessTemplateManagement(roles: string[]): boolean {
-  return roles.some((r) => ['admin', 'submitter', 'director'].includes(r));
+const TEMPLATE_ADMIN_ROLES = new Set(['admin', 'submitter', 'director']);
+const WORKFLOW_TEMPLATE_ADMIN_ROLES = new Set(['admin', 'director', 'submitter']);
+
+function hasAppPermission(permissions: string[] | undefined | null, ...names: string[]): boolean {
+  if (!permissions?.length) return false;
+  const set = new Set(permissions.map((p) => String(p)));
+  return names.some((n) => set.has(n));
+}
+
+/** Document template catalogue — anyone who can create documents may manage templates. */
+export function canAccessTemplateManagement(
+  roles: string[] | undefined | null,
+  permissions?: string[] | undefined | null
+): boolean {
+  const normalized = (roles ?? []).map((r) => String(r).toLowerCase());
+  if (normalized.some((r) => TEMPLATE_ADMIN_ROLES.has(r))) return true;
+  if (canCreateDocument(normalized, permissions ?? [])) return true;
+  return hasAppPermission(permissions, 'create_template', 'manage_templates', 'edit_document');
+}
+
+/** Create / edit workflow templates — same bar as document creators. */
+export function canCreateWorkflowTemplate(
+  roles: string[] | undefined | null,
+  permissions?: string[] | undefined | null
+): boolean {
+  const normalized = (roles ?? []).map((r) => String(r).toLowerCase());
+  if (normalized.some((r) => WORKFLOW_TEMPLATE_ADMIN_ROLES.has(r))) return true;
+  if (canCreateDocument(normalized, permissions ?? [])) return true;
+  return hasAppPermission(permissions, 'create_workflow', 'assign_workflow');
 }
 
 /** User Management (`/admin/users`) — administrators only. */

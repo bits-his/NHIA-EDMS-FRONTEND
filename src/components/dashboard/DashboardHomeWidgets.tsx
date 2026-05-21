@@ -8,6 +8,7 @@ import { PersonalOperationalPanel } from '@/components/operational/OperationalCo
 import { operationalApi } from '@/api/operational';
 import { periodParamsFromPreset } from '@/components/dashboard/DashboardPeriodSelect';
 import { useAuthStore } from '@/stores/authStore';
+import { canViewReportsNav } from '@/utils/permissions';
 import { QUERY_KEYS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
 import type { PersonalOperationalDashboard } from '@/types/operational';
@@ -24,6 +25,7 @@ export function PersonalOperationalSnapshot({
 }: PersonalOperationalSnapshotProps = {}) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const showReportsNav = canViewReportsNav(user?.roles);
   const params = useMemo(() => periodParamsFromPreset('30'), []);
 
   const { data: fetched, isLoading: fetching } = useQuery({
@@ -47,10 +49,12 @@ export function PersonalOperationalSnapshot({
             <Gauge className="h-3.5 w-3.5 mr-1" />
             My performance
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => navigate('/reports')}>
-            <BarChart3 className="h-3.5 w-3.5 mr-1" />
-            Full reports
-          </Button>
+          {showReportsNav ? (
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => navigate('/reports')}>
+              <BarChart3 className="h-3.5 w-3.5 mr-1" />
+              Full reports
+            </Button>
+          ) : null}
         </div>
       </div>
       {data ? (

@@ -11,6 +11,7 @@ import { ArrowLeft, Upload, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import MemoEditor from '@/components/documents/MemoEditor';
+import { DocumentRecipientTagsEditor } from '@/components/documents/DocumentRecipientTagsEditor';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,13 +24,13 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { useAuthStore } from '@/stores/authStore';
-import type { DocumentUrgency } from '@/types/document';
+import type { CreateRecipientInput, DocumentUrgency } from '@/types/document';
 import type { UserRecord } from '@/api/auth';
-import {
-  buildRankFilterOptions,
-  recipientUserLabel,
-  userMatchesRankFilter,
-} from '@/utils/recipientPicker';
+
+const recipientTagSchema = z.object({
+  user_id: z.string().uuid(),
+  recipient_type: z.enum(['to', 'cc', 'bcc']),
+});
 
 const documentTypeSchema = z.enum(['internal', 'external']);
 const correspondenceDirectionSchema = z.enum(['incoming', 'outgoing']);
@@ -55,9 +56,8 @@ const formSchema = z
     ref_code: z.string().max(120).optional(),
     correspondence_direction: correspondenceDirectionSchema.optional(),
     action: actionSchema,
-    /** Filter users by profile rank (NHIA grade / title); required before recipient when sending direct message. */
-    direct_recipient_rank: z.string().optional(),
-    direct_recipient_user_id: z.string().optional(),
+    /** To / CC / BCC tags applied at creation (workflow, direct message, or external). */
+    tagged_recipients: z.array(recipientTagSchema).default([]),
     /** Workflow engine template (GET /workflows/templates); used when delivery is workflow + submit. */
     workflow_template_id: z.string().optional(),
   })
@@ -86,18 +86,12 @@ const formSchema = z
       });
     }
     if (data.delivery_mode === 'direct_message' && data.action === 'send') {
-      if (!data.direct_recipient_rank?.trim()) {
+      const hasTo = (data.tagged_recipients ?? []).some((r) => r.recipient_type === 'to');
+      if (!hasTo) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Select a rank / role first',
-          path: ['direct_recipient_rank'],
-        });
-      }
-      if (!data.direct_recipient_user_id?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Select a recipient',
-          path: ['direct_recipient_user_id'],
+          message: 'Add at least one recipient tagged as To',
+          path: ['tagged_recipients'],
         });
       }
     }
@@ -120,32 +114,35 @@ function priorityToUrgency(p: CreateFormValues['document_priority']): DocumentUr
   }
 }
 
+/** Canonical department name from profile text, or empty when unset (no org-catalog fallback). */
 function resolveWorkflowDepartment(
   profile: { department?: string | null } | undefined,
   orgDepartments: { id: number; name: string }[] | undefined
 ): string {
   const fromProfile = profile?.department?.trim();
-  if (fromProfile && orgDepartments?.length) {
+  if (!fromProfile) return '';
+  if (orgDepartments?.length) {
     const m = orgDepartments.find((d) => d.name.toLowerCase() === fromProfile.toLowerCase());
     if (m) return m.name;
   }
-  return orgDepartments?.[0]?.name?.trim() ?? '';
+  return fromProfile;
 }
 
+/** Recipient department only; never default to the first org department. */
 function resolveDepartmentFromRecipient(
   userId: string | undefined,
   users: UserRecord[] | undefined,
   orgDepartments: { id: number; name: string }[] | undefined
 ): string {
-  if (!userId?.trim() || !users?.length) return orgDepartments?.[0]?.name?.trim() ?? '';
+  if (!userId?.trim() || !users?.length) return '';
   const u = users.find((x) => x.id === userId);
   const dept = u?.department?.trim();
-  if (dept && orgDepartments?.length) {
+  if (!dept) return '';
+  if (orgDepartments?.length) {
     const m = orgDepartments.find((d) => d.name.toLowerCase() === dept.toLowerCase());
     if (m) return m.name;
-    return dept;
   }
-  return orgDepartments?.[0]?.name?.trim() ?? '';
+  return dept;
 }
 
 export default function CreateDocumentPage() {
@@ -201,8 +198,7 @@ export default function CreateDocumentPage() {
       ref_code: '',
       correspondence_direction: 'incoming',
       action: 'send',
-      direct_recipient_rank: '',
-      direct_recipient_user_id: '',
+      tagged_recipients: [],
       workflow_template_id: '',
     },
   });
@@ -226,34 +222,12 @@ export default function CreateDocumentPage() {
     form.setValue('workflow_template_id', workflowTemplates[0].id, { shouldValidate: true });
   }, [deliveryMode, workflowTemplates, form]);
 
-  useEffect(() => {
-    if (deliveryMode === 'direct_message') return;
-    form.setValue('direct_recipient_rank', '', { shouldValidate: true });
-    form.setValue('direct_recipient_user_id', '', { shouldValidate: true });
-  }, [deliveryMode, form]);
-
   const recipientUsers = useMemo(
     () => (users ?? []).filter((u) => u.id !== authUser?.user_id),
     [users, authUser?.user_id]
   );
 
-  const rankFilterOptions = useMemo(
-    () => buildRankFilterOptions(recipientUsers, roles),
-    [recipientUsers, roles]
-  );
-
-  const selectedRecipientRank = form.watch('direct_recipient_rank');
-  const selectedAction = form.watch('action');
-
-  const filteredRecipientUsers = useMemo(() => {
-    if (selectedAction === 'draft' && !selectedRecipientRank?.trim()) {
-      return recipientUsers;
-    }
-    if (!selectedRecipientRank?.trim()) {
-      return selectedAction === 'send' ? [] : recipientUsers;
-    }
-    return recipientUsers.filter((u) => userMatchesRankFilter(u, selectedRecipientRank, roles));
-  }, [recipientUsers, selectedRecipientRank, selectedAction, roles]);
+  const taggedRecipients = form.watch('tagged_recipients') ?? [];
 
   const lastAppliedDocumentTemplateId = useRef<string | null>(null);
   const prevDocumentSource = useRef(documentSource);
@@ -324,17 +298,14 @@ export default function CreateDocumentPage() {
       const useWorkflow = data.delivery_mode === 'workflow';
       const orgDepts = orgScope?.departments;
 
+      const firstToRecipient = (data.tagged_recipients ?? []).find((r) => r.recipient_type === 'to');
       const department =
-        data.delivery_mode === 'direct_message'
-          ? resolveDepartmentFromRecipient(data.direct_recipient_user_id, users, orgDepts)
+        data.delivery_mode === 'direct_message' && firstToRecipient
+          ? resolveDepartmentFromRecipient(firstToRecipient.user_id, users, orgDepts)
           : resolveWorkflowDepartment(profile, orgDepts);
 
-      if (!department) throw new Error('Could not resolve a department. Check org data or recipient profile.');
-
-      const recipients =
-        data.delivery_mode === 'direct_message' && data.direct_recipient_user_id?.trim()
-          ? [{ user_id: data.direct_recipient_user_id.trim(), recipient_type: 'to' as const }]
-          : undefined;
+      const recipients: CreateRecipientInput[] | undefined =
+        (data.tagged_recipients ?? []).length > 0 ? data.tagged_recipients : undefined;
 
       const creationProfile = {
         delivery_mode: data.delivery_mode,
@@ -453,8 +424,6 @@ export default function CreateDocumentPage() {
     profile?.full_name?.trim() || profile?.username || authUser?.username || 'Signed-in user';
   const senderEmail = profile?.email?.trim() || '—';
   const letterheadLabel = documentType === 'internal' ? 'Internal document' : 'External document';
-  const showActionSection = deliveryMode === 'direct_message';
-
   const submitDisabled =
     (documentType === 'internal' &&
       documentSource === 'template' &&
@@ -466,7 +435,7 @@ export default function CreateDocumentPage() {
   return (
     <div className="w-full min-w-0 space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
-        <ArrowLeft className="h-4 w-4" /> Documents
+        <ArrowLeft className="h-4 w-4" /> Process
       </Button>
 
       <PageHeader
@@ -820,6 +789,7 @@ export default function CreateDocumentPage() {
                   key={documentSource === 'manual_entry' ? 'body-manual' : `body-template-${documentTemplateId || 'none'}`}
                   hideLetterhead
                   startBlank={documentSource === 'manual_entry'}
+                  editorMinHeight={documentSource === 'manual_entry' ? 560 : 400}
                   value={bodyHtml ?? ''}
                   onChange={(val) => form.setValue('body_html', val)}
                 />
@@ -950,142 +920,56 @@ export default function CreateDocumentPage() {
             </div>
               </section>
 
-            {showActionSection && (
-              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-direct">
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-recipients">
                 <h3
-                  id="section-direct"
-                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                  id="section-recipients"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
                 >
-                  Direct message
+                  <User className="h-3.5 w-3.5" />
+                  Recipients
                 </h3>
-              <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Pick a rank or role first, then choose the user. Each option shows name, rank, and department.
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Action</Label>
-                    <Select
-                      value={form.watch('action')}
-                      onValueChange={(v) => form.setValue('action', v as CreateFormValues['action'])}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="send">Send</SelectItem>
-                        <SelectItem value="draft">Save as draft</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>
-                      Rank / role
-                      {form.watch('action') === 'send' ? (
-                        <span className="text-destructive"> *</span>
-                      ) : null}
-                      {form.watch('action') === 'draft' ? (
-                        <span className="text-muted-foreground font-normal"> (optional — narrows recipients)</span>
-                      ) : null}
-                    </Label>
-                    <Select
-                      value={form.watch('direct_recipient_rank')?.trim() || '__none__'}
-                      onValueChange={(v) => {
-                        const next = v === '__none__' ? '' : v;
-                        form.setValue('direct_recipient_rank', next, { shouldValidate: true });
-                        form.setValue('direct_recipient_user_id', '', { shouldValidate: true });
-                      }}
-                    >
-                      <SelectTrigger
-                        className={
-                          form.formState.errors.direct_recipient_rank ? 'border-destructive' : undefined
-                        }
-                      >
-                        <SelectValue placeholder="Select rank / role first" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">
-                          {form.watch('action') === 'draft' ? 'Any rank (show all)' : 'Select rank / role…'}
-                        </SelectItem>
-                        {rankFilterOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {form.formState.errors.direct_recipient_rank && (
-                      <p className="text-xs text-destructive">
-                        {form.formState.errors.direct_recipient_rank.message}
-                      </p>
-                    )}
-                    {!rankFilterOptions.length && recipientUsers.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        No rank or role could be derived for directory users (missing profile rank and role
-                        assignments). Ask an admin to set rank or roles on user profiles, or save as draft and pick from
-                        the full list.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label>
-                    Recipient
-                    {form.watch('action') === 'send' ? (
-                      <span className="text-destructive"> *</span>
-                    ) : null}
-                    {form.watch('action') === 'draft' ? (
-                      <span className="text-muted-foreground font-normal"> (optional for draft)</span>
-                    ) : null}
-                  </Label>
-                  <Select
-                    value={form.watch('direct_recipient_user_id') || '__none__'}
-                    disabled={
-                      form.watch('action') === 'send' && !form.watch('direct_recipient_rank')?.trim()
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Tag staff as <span className="font-medium text-foreground">To</span>,{' '}
+                    <span className="font-medium text-foreground">CC</span>, or{' '}
+                    <span className="font-medium text-foreground">BCC</span>. Optional for workflow drafts; direct
+                    message send requires at least one To recipient.
+                  </p>
+                  <DocumentRecipientTagsEditor
+                    users={recipientUsers}
+                    roles={roles}
+                    currentUserId={authUser?.user_id}
+                    value={taggedRecipients}
+                    onChange={(next) =>
+                      form.setValue('tagged_recipients', next, { shouldValidate: true })
                     }
-                    onValueChange={(v) =>
-                      form.setValue('direct_recipient_user_id', v === '__none__' ? '' : v, {
-                        shouldValidate: true,
-                      })
-                    }
-                  >
-                    <SelectTrigger
-                      className={
-                        form.formState.errors.direct_recipient_user_id ? 'border-destructive' : undefined
-                      }
-                    >
-                      <SelectValue
-                        placeholder={
-                          form.watch('action') === 'send' && !form.watch('direct_recipient_rank')?.trim()
-                            ? 'Choose rank / role first'
-                            : 'Select user (rank & department)'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Select user</SelectItem>
-                      {filteredRecipientUsers.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {recipientUserLabel(u, roles)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {form.watch('action') === 'send' &&
-                    !!form.watch('direct_recipient_rank')?.trim() &&
-                    !filteredRecipientUsers.length && (
-                      <p className="text-xs text-muted-foreground">No users with this rank in the directory.</p>
-                    )}
-                  {form.formState.errors.direct_recipient_user_id && (
+                  />
+                  {form.formState.errors.tagged_recipients && (
                     <p className="text-xs text-destructive">
-                      {form.formState.errors.direct_recipient_user_id.message}
+                      {typeof form.formState.errors.tagged_recipients.message === 'string'
+                        ? form.formState.errors.tagged_recipients.message
+                        : 'Check recipient tags'}
                     </p>
                   )}
+                  {deliveryMode === 'direct_message' && (
+                    <div className="space-y-1.5 max-w-xs pt-1 border-t border-border/60">
+                      <Label>Direct message action</Label>
+                      <Select
+                        value={form.watch('action')}
+                        onValueChange={(v) => form.setValue('action', v as CreateFormValues['action'])}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="send">Send</SelectItem>
+                          <SelectItem value="draft">Save as draft</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
-              </div>
               </section>
-            )}
 
               <section
                 className="flex flex-col gap-4 border-t border-border bg-muted/10 px-4 py-6 sm:px-6"

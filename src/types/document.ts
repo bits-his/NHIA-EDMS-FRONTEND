@@ -120,7 +120,8 @@ export interface CreateDocumentRequest extends Partial<DocumentCreationProfile> 
   title: string;
   content?: string;
   category: DocumentCategory;
-  department: string;
+  /** Omit or send empty when the owner/recipient has no department on file. */
+  department?: string;
   urgency?: DocumentUrgency;
   template_id?: string;
   /** Omit for auto-generated ref; must be unique when set. */

@@ -5,14 +5,16 @@ import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Lock, User, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, ShieldCheck, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { authApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { getErrorMessage } from '@/api/client';
-import { NHIA_LOGO_SRC } from '@/constants/brandAssets';
+import { AppBrand } from '@/components/brand/AppBrand';
+import { SYSTEM_NAME } from '@/constants/brand';
 
 const loginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
@@ -54,8 +56,12 @@ export default function LoginPage() {
       toast.success('Welcome back!');
       navigate(from, { replace: true });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: () => {
+      /* Error is shown inline below — Toaster is not mounted on the public login route. */
+    },
   });
+
+  const loginErrorMessage = mutation.isError ? getErrorMessage(mutation.error) : null;
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -73,11 +79,8 @@ export default function LoginPage() {
           }}
         />
 
-        {/* Logo */}
         <div className="relative z-10">
-          <div className="inline-block bg-white rounded-xl px-4 py-2.5 shadow-lg">
-            <img src={NHIA_LOGO_SRC} alt="NHIA" className="h-10 w-auto object-contain" />
-          </div>
+          <AppBrand variant="login-hero" />
         </div>
 
         {/* Quote */}
@@ -87,9 +90,9 @@ export default function LoginPage() {
           </div>
           <blockquote>
             <p className="text-xl xl:text-2xl font-semibold text-white leading-relaxed">
-              Secure, traceable, and efficient document management for the National Health Insurance Authority.
+              Secure, traceable, and efficient electronic document management.
             </p>
-            <footer className="mt-3 text-sm text-white/50">NHIA Electronic Document Management System</footer>
+            <footer className="mt-3 text-sm text-white/50">{SYSTEM_NAME}</footer>
           </blockquote>
         </div>
 
@@ -113,7 +116,7 @@ export default function LoginPage() {
         <div className="w-full max-w-[380px]">
           {/* Mobile logo */}
           <div className="mb-8 lg:hidden">
-            <img src={NHIA_LOGO_SRC} alt="NHIA" className="h-9 w-auto object-contain" />
+            <AppBrand variant="login-compact" />
           </div>
 
           {/* Heading */}
@@ -130,7 +133,21 @@ export default function LoginPage() {
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
+          <form
+            onSubmit={handleSubmit((d) => {
+              mutation.reset();
+              mutation.mutate(d);
+            })}
+            className="space-y-4"
+          >
+            {loginErrorMessage ? (
+              <Alert variant="destructive" role="alert" aria-live="polite">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Sign in failed</AlertTitle>
+                <AlertDescription>{loginErrorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+
             <div className="space-y-1.5">
               <Label htmlFor="username">Username</Label>
               <div className="relative">
@@ -175,7 +192,7 @@ export default function LoginPage() {
             </div>
 
             <Button type="submit" className="w-full" size="lg" loading={mutation.isPending}>
-              Sign in to NHIA-EDMS
+              Sign in to {SYSTEM_NAME}
             </Button>
           </form>
 

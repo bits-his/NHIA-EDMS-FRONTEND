@@ -83,8 +83,11 @@ export function DocumentActions({
   const actions = getDocumentActions(document.status, roles, actionContext, workflowStepActionType);
   const at = normalizeWorkflowStepActionType(workflowStepActionType);
 
+  const isDirectMessage = document.delivery_mode === 'direct_message';
+
   const showApproveAndForward =
     !suppressWorkflowStepActions &&
+    !isDirectMessage &&
     actions.canApproveForward &&
     at !== 'review' &&
     at !== 'final_approve';
@@ -107,6 +110,9 @@ export function DocumentActions({
     if (currentUserId) {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.tasks(currentUserId) });
     }
+    queryClient.invalidateQueries({
+      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'tasks',
+    });
   };
 
   const invalidateAfterWorkflow = (workflowId: string) => {
@@ -160,7 +166,7 @@ export function DocumentActions({
         }
         invalidateAfterWorkflow(data.workflow.id);
       } else {
-        toast.success('Approved forward — your signature was appended to the document.');
+        toast.success('Approved and sent — your e-signature was appended to the memo.');
       }
       invalidateDoc();
       setCommentDialog(null);
@@ -205,17 +211,17 @@ export function DocumentActions({
       if (data?.workflow) {
         if (data.workflow.status === 'completed') {
           toast.success(
-            'Final approval recorded — document filed to the organisation registry and workflow completed.'
+            'Final approval recorded — process archived (read-only) and workflow completed.'
           );
         } else {
-          toast.success('Document filed to the organisation registry; workflow advanced.');
+          toast.success('Process archived (read-only); workflow advanced.');
         }
         if (data.warnings?.length) {
           toast.warning('Some notifications or tasks could not be updated.');
         }
         invalidateAfterWorkflow(data.workflow.id);
       } else {
-        toast.success('Document filed to the organisation registry.');
+        toast.success('Process archived and is now read-only.');
       }
       invalidateDoc();
       setCommentDialog(null);
@@ -223,8 +229,6 @@ export function DocumentActions({
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
-
-  const isDirectMessage = document.delivery_mode === 'direct_message';
 
   const openCommentDialog = (kind: CommentDialogKind) => {
     setComment('');
@@ -268,27 +272,10 @@ export function DocumentActions({
         break;
       case 'requestInfo':
         mutation.mutate({
-          fn: async () => {
-            const updated = await documentsApi.requestInfo(document.id, c);
-            if (
-              !isDirectMessage &&
-              workflowInstanceId &&
-              (workflowCurrentStep ?? 0) > 1
-            ) {
-              try {
-                const res = await workflowApi.stepBack(workflowInstanceId, c);
-                if (res?.workflow?.id) invalidateAfterWorkflow(res.workflow.id);
-              } catch (e) {
-                toast.warning(
-                  `Request recorded, but the workflow could not move to the previous step: ${getErrorMessage(e)}`
-                );
-              }
-            }
-            return updated;
-          },
+          fn: () => documentsApi.requestInfo(document.id, c),
           message: isDirectMessage
             ? 'Information request sent — document returned to the sender'
-            : (workflowCurrentStep ?? 0) > 1 && workflowInstanceId
+            : (workflowCurrentStep ?? 0) > 1
               ? 'Information request recorded — workflow returned to the previous step'
               : 'Information request recorded',
         });
@@ -330,19 +317,19 @@ export function DocumentActions({
       title: 'Request more information',
       description: isDirectMessage
         ? 'Explain what you need. The document will be sent back to whoever forwarded it to you so they can respond.'
-        : 'Explain what additional information is needed. Status stays pending. When there is an active workflow beyond step 1, it moves back one step so the previous participant can respond.',
+        : 'Explain what additional information is needed. The workflow returns to the previous step so that person can update the memo and send it forward again (Approve and send or Forward).',
       placeholder: 'What information is needed…',
     },
     approveForward: {
-      title: 'Approve and forward',
+      title: 'Approve and send',
       description:
-        'Records approval, appends your e-signature to the document body (requires signature in Settings), and advances the workflow to the next step when applicable. Optional note.',
+        'Records approval, appends your e-signature to the memo (set up under Settings → E-signature), and sends the process to the next step when a workflow applies. Optional note.',
       placeholder: 'Optional note…',
     },
     finalApprove: {
       title: 'Final approval',
       description:
-        'Files the document to the organisation registry (archived). No signature is appended — signatures are added when using Approve and forward on earlier steps. Optional note is stored on the action record.',
+        'Final approval closes this chain. The process will become read-only and archived, and no further recipients can act on it. Your e-signature is appended when configured in Settings. Optional note is stored on the action record.',
       placeholder: 'Optional note…',
     },
     reviewForward: {
@@ -408,7 +395,7 @@ export function DocumentActions({
         {showApproveAndForward && (
           <Button variant="default" size="sm" onClick={() => openCommentDialog('approveForward')}>
             <Forward className="h-4 w-4 rotate-[-45deg]" />
-            Approve and forward
+            Approve and send
           </Button>
         )}
         {!isDirectMessage && actions.canRequestInfo && (
@@ -429,7 +416,7 @@ export function DocumentActions({
             Reject
           </Button>
         )}
-        {!suppressWorkflowStepActions && actions.canFinalApprove && (
+        {!isDirectMessage && !suppressWorkflowStepActions && actions.canFinalApprove && (
           <Button variant="default" size="sm" onClick={() => openCommentDialog('finalApprove')}>
             <ShieldCheck className="h-4 w-4" />
             Final approve
@@ -447,8 +434,8 @@ export function DocumentActions({
         <ConfirmDialog
           open
           onOpenChange={(open) => !open && setPendingConfirm(null)}
-          title="Submit document"
-          description="This submits the document for review. If a workflow was chosen when the document was created, or if this memo’s catalogue template assigns a workflow, that workflow starts now (once). You will not be able to edit content until it is rejected back to draft."
+          title="Submit for review"
+          description="This starts the review process. If a workflow was chosen when the case was created, or if the catalogue template assigns one, that workflow runs now (once). You will not be able to edit content until it is returned to draft."
           confirmLabel="Submit"
           variant="default"
           onConfirm={async () => {
@@ -529,7 +516,7 @@ export function DocumentActions({
                   <CheckCircle className="h-4 w-4" /> Final approve
                 </>
               ) : commentDialog === 'approveForward' ? (
-                'Approve and forward'
+                'Approve and send'
               ) : commentDialog === 'reviewForward' ? (
                 'Forward'
               ) : commentDialog === 'directMessageComment' ? (

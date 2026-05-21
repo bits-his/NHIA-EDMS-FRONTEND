@@ -12,13 +12,13 @@ export const DOCUMENT_STATUS_CONFIG: Record<
     dot: 'bg-slate-400',
   },
   pending: {
-    label: 'Pending Review',
+    label: 'In progress',
     color: 'text-amber-700 dark:text-amber-400',
     bg: 'bg-amber-50 dark:bg-amber-900/30',
     dot: 'bg-amber-500',
   },
   approved: {
-    label: 'Approved',
+    label: 'Completed',
     color: 'text-emerald-700 dark:text-emerald-400',
     bg: 'bg-emerald-50 dark:bg-emerald-900/30',
     dot: 'bg-emerald-500',
@@ -30,7 +30,7 @@ export const DOCUMENT_STATUS_CONFIG: Record<
     dot: 'bg-red-500',
   },
   archived: {
-    label: 'Archived',
+    label: 'Archived (read-only)',
     color: 'text-slate-500 dark:text-slate-500',
     bg: 'bg-slate-100 dark:bg-slate-800/50',
     dot: 'bg-slate-400',

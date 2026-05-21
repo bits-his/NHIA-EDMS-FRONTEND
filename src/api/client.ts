@@ -45,11 +45,14 @@ function createClient(baseURL: string): AxiosInstance {
     (res) => res,
     (error) => {
       if (error.response?.status === 401) {
-        // Token expired — clear persisted auth state.
-        // The React Router guards will redirect to /login on next render.
-        // We avoid window.location.href to prevent a hard reload race condition.
-        const { clearAuth } = useAuthStoreRaw.getState();
-        clearAuth();
+        const requestUrl = String(error.config?.url ?? '');
+        const isLoginAttempt = /\/auth\/login\b/i.test(requestUrl);
+        if (!isLoginAttempt) {
+          // Token expired — clear persisted auth state.
+          // The React Router guards will redirect to /login on next render.
+          const { clearAuth } = useAuthStoreRaw.getState();
+          clearAuth();
+        }
       }
       return Promise.reject(error);
     }

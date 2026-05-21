@@ -1,7 +1,13 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import type { ReactNode } from 'react';
-import { canCreateDocument, isJuniorStaffOnly, isRouteAllowedForJuniorStaff } from '@/utils/permissions';
+import {
+  canAccessTemplateManagement,
+  canCreateDocument,
+  canCreateWorkflowTemplate,
+  isJuniorStaffOnly,
+  isRouteAllowedForJuniorStaff,
+} from '@/utils/permissions';
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -47,9 +53,13 @@ export function CanCreateDocumentGuard({
 /** Redirects officer / senior_officer users away from routes not in their allow-list. */
 export function JuniorStaffRouteGuard({ children }: { children: ReactNode }) {
   const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const permissions = useAuthStore((s) => s.user?.permissions ?? []);
   const location = useLocation();
 
-  if (isJuniorStaffOnly(roles) && !isRouteAllowedForJuniorStaff(location.pathname)) {
+  if (
+    isJuniorStaffOnly(roles) &&
+    !isRouteAllowedForJuniorStaff(location.pathname, roles, permissions)
+  ) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -74,4 +84,52 @@ export function RoleGuard({
   }
 
   return <>{children}</>;
+}
+
+/** Gate routes by a boolean capability (roles + permissions helpers). */
+export function AccessGuard({
+  children,
+  allow,
+  fallback,
+}: {
+  children: ReactNode;
+  allow: boolean;
+  fallback?: ReactNode;
+}) {
+  if (!allow) {
+    return fallback ? <>{fallback}</> : null;
+  }
+  return <>{children}</>;
+}
+
+export function TemplateManagementGuard({
+  children,
+  fallback,
+}: {
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const permissions = useAuthStore((s) => s.user?.permissions ?? []);
+  return (
+    <AccessGuard allow={canAccessTemplateManagement(roles, permissions)} fallback={fallback}>
+      {children}
+    </AccessGuard>
+  );
+}
+
+export function WorkflowTemplateGuard({
+  children,
+  fallback,
+}: {
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const permissions = useAuthStore((s) => s.user?.permissions ?? []);
+  return (
+    <AccessGuard allow={canCreateWorkflowTemplate(roles, permissions)} fallback={fallback}>
+      {children}
+    </AccessGuard>
+  );
 }

@@ -55,11 +55,12 @@ import { resolveUsername } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
 import { isUuid } from '@/utils/uuid';
 import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
+import { wasReturnedForMoreInfo } from '@/utils/wasReturnedForMoreInfo';
 import {
   getPendingDocumentWorkflowStageLabel,
   getWorkflowStepDefinitionForInstance,
 } from '@/utils/workflowStageLabel';
-import { getDocumentActions } from '@/utils/permissions';
+import { getDocumentActions, normalizeWorkflowStepActionType } from '@/utils/permissions';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { documentTypeHeadline, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
 import { correspondenceDirectionLabel } from '@/utils/correspondence';
@@ -111,11 +112,15 @@ function DocumentDetailToolbar({
   onBack,
   onOpenProfile,
   onOpenWorkflow,
+  onExport,
+  exportLoading = false,
   showWorkflow = false,
 }: {
   onBack: () => void;
   onOpenProfile?: () => void;
   onOpenWorkflow?: () => void;
+  onExport?: () => void;
+  exportLoading?: boolean;
   showWorkflow?: boolean;
 }) {
   return (
@@ -128,6 +133,18 @@ function DocumentDetailToolbar({
         <ArrowLeft className="h-4 w-4" />
         Back
       </Button>
+      {onExport && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 shrink-0"
+          onClick={onExport}
+          loading={exportLoading}
+        >
+          <FileDown className="h-4 w-4" />
+          Export document
+        </Button>
+      )}
       {onOpenProfile && (
         <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={onOpenProfile}>
           <FileText className="h-4 w-4" />
@@ -184,12 +201,14 @@ export default function DocumentDetailPage() {
     queryKey: QUERY_KEYS.tasks(user?.user_id ?? ''),
     queryFn: () => tasksApi.list(user!.user_id),
     enabled: !!user?.user_id && doc?.status === 'pending',
+    refetchOnMount: 'always',
   });
 
   const { data: wfInstance } = useQuery({
     queryKey: QUERY_KEYS.workflowInstanceByDocument(id!),
     queryFn: () => workflowApi.getInstanceByDocumentId(id!),
     enabled: documentIdValid && doc?.status === 'pending',
+    refetchOnMount: 'always',
   });
 
   /** Workflow template name — fetched whenever the doc carries a workflow selection, regardless of status. */
@@ -350,6 +369,29 @@ export default function DocumentDetailPage() {
   ]);
 
   const canPostComment = !!docActionsAvailable?.canEditForward;
+  const showReturnedForInfoHint = useMemo(
+    () =>
+      doc?.status === 'pending' &&
+      hasActiveWorkflowTaskForDoc &&
+      wasReturnedForMoreInfo({
+        workflowActions,
+        tasks: myTasks,
+        documentId: doc?.id ?? '',
+        currentUserId: user?.user_id,
+        workflowInstance: wfInstance,
+        isDirectMessageRecipient,
+      }),
+    [
+      doc?.status,
+      doc?.id,
+      hasActiveWorkflowTaskForDoc,
+      workflowActions,
+      myTasks,
+      user?.user_id,
+      wfInstance,
+      isDirectMessageRecipient,
+    ]
+  );
   const inlineWorkflowActionEnabled =
     canPostComment &&
     doc?.delivery_mode === 'workflow' &&
@@ -471,7 +513,7 @@ export default function DocumentDetailPage() {
           title="Invalid document link"
           error={
             new Error(
-              'This URL is not a valid document id. Open Documents from the sidebar and pick an item from the list.'
+              'This URL is not a valid process id. Open Process from the sidebar and pick an item from the list.'
             )
           }
         />
@@ -539,6 +581,8 @@ export default function DocumentDetailPage() {
       <div className="flex items-start justify-between gap-4 flex-wrap">       
         <DocumentDetailToolbar
           onBack={() => navigate('/documents')}
+          onExport={openDocumentExport}
+          exportLoading={exportMutation.isPending}
           onOpenProfile={() => setProfileOpen(true)}
           onOpenWorkflow={() => setWorkflowOpen(true)}
           showWorkflow={doc.delivery_mode === 'workflow'}
@@ -563,6 +607,25 @@ export default function DocumentDetailPage() {
           />
         </div>
       </div>
+
+      {showReturnedForInfoHint ? (
+        <Alert className="border-amber-200 bg-amber-50/90 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <AlertDescription className="text-sm text-amber-950 dark:text-amber-100">
+            {doc?.delivery_mode === 'direct_message' ? (
+              <>
+                This direct message was returned to you for more information. Use <strong>Edit</strong> to
+                update the memo, then <strong>Approve and send</strong> when you are ready to pass it back.
+              </>
+            ) : (
+              <>
+                This process was returned to you for more information. Use <strong>Edit</strong> to update the
+                memo, then <strong>Approve and send</strong> or <strong>Forward</strong> to pass it to the next
+                step.
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {/* Main grid: memo card (left) + activity sidebar (right) */}
       <div className="lg:grid lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start space-y-6 xl:space-y-0">
@@ -664,7 +727,7 @@ export default function DocumentDetailPage() {
                   {hasBodyText ? (
                     <div className="rounded-lg border border-border/60 bg-background overflow-hidden">
                       <div
-                        className="prose prose-sm max-w-none px-5 py-4 text-foreground"
+                        className="prose prose-sm max-w-none px-5 py-4 text-foreground [&_.nhia-approve-forward-stamp]:not-prose [&_.nhia-approve-forward-stamp]:flex [&_.nhia-approve-forward-stamp]:flex-col [&_.nhia-approve-forward-stamp]:gap-1.5 [&_.nhia-approve-forward-stamp_p]:my-0 [&_.nhia-approve-forward-name]:font-semibold [&_.nhia-approve-forward-name]:text-sm [&_.nhia-approve-forward-rank]:text-sm [&_.nhia-approve-forward-dept-zone]:text-sm [&_.nhia-approve-forward-sig]:max-h-[72px]"
                         dangerouslySetInnerHTML={{
                           __html: doc.title?.trim()
                             ? stripFirstHtmlBlockMatchingTitle(bodyHtml, doc.title)
@@ -783,11 +846,19 @@ export default function DocumentDetailPage() {
             versions={versions}
             versionsLoading={versionsLoading}
           />
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={openDocumentExport}
+            loading={exportMutation.isPending}
+          >
+            <FileDown className="h-4 w-4" />
+            Export document
+          </Button>
           <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
-            <strong>Export document</strong> opens a printable view with the full case file:
-            NHIA letterhead (for internal memos), document body, profile, recipients,
-            attachments and the complete comments &amp; activity timeline. Use your
-            browser's print dialog to save it as a PDF.
+            Opens a printable view with letterhead (internal memos), body, profile, recipients,
+            attachments, and the full activity timeline. Use your browser print dialog to save as PDF.
           </p>
         </aside>
       </div>

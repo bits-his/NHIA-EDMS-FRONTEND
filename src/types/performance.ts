@@ -10,11 +10,16 @@ export interface PerformanceLeaderboardEntry {
   tasks_completed: number;
   documents_initiated: number;
   documents_approved: number;
+  /** Completed arrival→action episodes (document assigned to staff until they acted). */
+  documents_acted?: number;
   total_contribution: number;
   avg_task_hours: number | null;
   median_task_hours: number | null;
+  avg_response_hours?: number | null;
+  median_response_hours?: number | null;
   avg_approval_hours: number | null;
   overdue_active: number;
+  pending_assignments?: number;
 }
 
 export interface PerformanceTrendPoint {
@@ -39,6 +44,8 @@ export interface PerformanceAnalyticsResponse {
     totalContributions: number;
     avgTaskHours: number | null;
     medianTaskHours: number | null;
+    avgResponseHours?: number | null;
+    medianResponseHours?: number | null;
     overdueActive: number;
   };
   leaderboard: PerformanceLeaderboardEntry[];

@@ -247,9 +247,10 @@ export const documentsApi = {
   },
 
   /** Workflow approve-forward step: appends user e-signature stamp to document body on the server. */
-  approveForward: async (id: string, comment?: string): Promise<Document> => {
+  approveForward: async (id: string, comment?: string, nextUserId?: string): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve-forward`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
+      ...(nextUserId?.trim() ? { next_user_id: nextUserId.trim() } : {}),
     });
     return res.data;
   },

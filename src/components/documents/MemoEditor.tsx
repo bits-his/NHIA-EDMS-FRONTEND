@@ -25,6 +25,8 @@ interface MemoEditorProps {
    * When true and `value` is empty, the editor starts with a single empty paragraph instead of the memo boilerplate.
    */
   startBlank?: boolean;
+  /** Min height of the editable area in pixels (default 400). */
+  editorMinHeight?: number;
   /** Template document type catalogue label; letterhead omits the trailing word “Template”. */
   documentTypeLabel?: string;
   /** Letterhead address line: zone/state from organisational scope (with `letterheadZones`). */
@@ -117,6 +119,7 @@ export default function MemoEditor({
   onChange,
   hideLetterhead = false,
   startBlank = false,
+  editorMinHeight = 400,
   documentTypeLabel,
   letterheadZoneCode,
   letterheadStateOfficeName,
@@ -139,7 +142,10 @@ export default function MemoEditor({
       ) : null}
 
       {/* Editor — min-height ensures the editable area is always visible */}
-      <div className="[&_.ck-editor__editable]:min-h-[400px] [&_.ck-editor__editable]:px-8 [&_.ck-editor__editable]:py-4">
+      <div
+        className="[&_.ck-editor__editable]:min-h-[var(--memo-editor-min-h)] [&_.ck-editor__editable]:px-8 [&_.ck-editor__editable]:py-4"
+        style={{ ['--memo-editor-min-h' as string]: `${editorMinHeight}px` }}
+      >
         <CKEditor
           editor={ClassicEditor}
           data={initialData}

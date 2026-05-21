@@ -22,7 +22,7 @@ const ROUTE_LABELS: Record<string, string> = {
   dashboard:     'Dashboard',
   performance:   'Performance tracking',
   operational:   'Operational command centre',
-  documents:     'Documents',
+  documents:     'Process',
   archive:       'Document archive',
   reports:       'Reports',
   tasks:         'My Tasks',

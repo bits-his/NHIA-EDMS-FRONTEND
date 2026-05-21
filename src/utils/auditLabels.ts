@@ -12,7 +12,7 @@ const ACTION_TITLES: Record<string, string> = {
   'document.edit_forward': 'Edit forwarded (workflow note)',
   'document.approve_forward': 'Approved forward (signature applied)',
   'document.request_info': 'More information requested',
-  'document.final_approve': 'Final approval (filed / archived)',
+  'document.final_approve': 'Final approval (process archived)',
   'document.archive': 'Document archived',
   'document.comment': 'Comment on document',
   'document.discussion.created': 'Discussion started',

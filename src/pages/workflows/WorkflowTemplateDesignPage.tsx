@@ -14,14 +14,14 @@ import { workflowApi } from '@/api/workflow';
 import { QUERY_KEYS } from '@/utils/constants';
 import { isUuid } from '@/utils/uuid';
 import { useAuthStore } from '@/stores/authStore';
-
-const CUSTOM_WORKFLOW_CREATOR_ROLES = new Set(['admin', 'director', 'submitter']);
+import { canCreateWorkflowTemplate } from '@/utils/permissions';
 
 export default function WorkflowTemplateDesignPage() {
   const { templateId } = useParams<{ templateId: string }>();
   const navigate = useNavigate();
   const roles = useAuthStore((s) => s.user?.roles) ?? [];
-  const canEditWorkflow = roles.some((r) => CUSTOM_WORKFLOW_CREATOR_ROLES.has(r));
+  const permissions = useAuthStore((s) => s.user?.permissions) ?? [];
+  const canEditWorkflow = canCreateWorkflowTemplate(roles, permissions);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const valid = !!templateId && isUuid(templateId);
 

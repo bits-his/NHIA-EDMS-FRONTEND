@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import ExecutiveReportPage from '@/pages/dashboard/ExecutiveReportPage';
 import { Archive, FileBarChart, Search, X } from 'lucide-react';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -20,7 +20,7 @@ import { registerUsers, resolveUsername } from '@/utils/users';
 import { documentTypeHeadline } from '@/utils/documentDisplay';
 import type { Document, DocumentStatus } from '@/types/document';
 import type { RegistrySearchFilters } from '@/types/registry';
-import { canViewOperationalOverview } from '@/utils/permissions';
+import { canViewOperationalOverview, canViewReportsNav } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { OperationalReportingHubPanel } from '@/components/reporting/OperationalReportingHubPanel';
 
@@ -303,6 +303,11 @@ export default function ArchivePage() {
 export function ReportsPage() {
   const [searchParams] = useSearchParams();
   const user = useAuthStore((s) => s.user);
+
+  if (!canViewReportsNav(user?.roles)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   const orgWide = canViewOperationalOverview(user?.roles ?? [], user?.permissions ?? []);
 
   if (searchParams.get('kind')) {
