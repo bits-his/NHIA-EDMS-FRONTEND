@@ -28,6 +28,7 @@ import { getDocumentActions } from '@/utils/permissions';
 import { useAuthStore } from '@/stores/authStore';
 import { isUuid } from '@/utils/uuid';
 import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
+import { isReadOnlyDocumentRecipient } from '@/utils/recipientPicker';
 
 const editSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500, 'Max 500 characters'),
@@ -69,6 +70,12 @@ export default function EditDocumentPage() {
     enabled: !!wfInstance?.template_id,
   });
 
+  const { data: recipients } = useQuery({
+    queryKey: QUERY_KEYS.documentRecipients(id!),
+    queryFn: () => documentsApi.listRecipients(id!),
+    enabled: documentIdValid,
+  });
+
   const pendingStageLabel = useMemo(
     () =>
       document?.status === 'pending'
@@ -81,6 +88,12 @@ export default function EditDocumentPage() {
     () => hasActiveTaskOnCurrentWorkflowStep(myTasks, document?.id ?? '', wfInstance),
     [myTasks, document?.id, wfInstance]
   );
+
+  const isReadOnlyRecipient = useMemo(() => {
+    if (!isReadOnlyDocumentRecipient(recipients, user?.user_id)) return false;
+    if (hasActiveWorkflowTaskForDoc) return false;
+    return true;
+  }, [recipients, user?.user_id, hasActiveWorkflowTaskForDoc]);
 
   const currentWorkflowStepDef = useMemo(
     () => getWorkflowStepDefinitionForInstance(wfInstance ?? undefined, wfTemplate ?? undefined),
@@ -97,10 +110,12 @@ export default function EditDocumentPage() {
         userId: user?.user_id,
         ownerId: document.owner_id,
         hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
+        deliveryMode: document.delivery_mode ?? null,
+        isReadOnlyRecipient,
       },
       currentWorkflowStepDef?.action_type ?? null
     );
-  }, [document, user, hasActiveWorkflowTaskForDoc, currentWorkflowStepDef?.action_type]);
+  }, [document, user, hasActiveWorkflowTaskForDoc, currentWorkflowStepDef?.action_type, isReadOnlyRecipient]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors, isDirty } } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
@@ -161,10 +176,19 @@ export default function EditDocumentPage() {
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            This process is in <strong>{document.status}</strong> status and cannot be edited with your current
-            access. Draft memos can be edited by the owner (or authorised roles). When the workflow is returned to
-            you after a request for information, you need an active task on the current step — refresh the page if
-            you were just notified.
+            {isReadOnlyRecipient ? (
+              <>
+                You are tagged as <strong>CC</strong> or <strong>BCC</strong> on this document. CC/BCC recipients
+                have read-only access and cannot edit the memo.
+              </>
+            ) : (
+              <>
+                This process is in <strong>{document.status}</strong> status and cannot be edited with your current
+                access. Draft memos can be edited by the owner (or authorised roles). When the workflow is returned to
+                you after a request for information, you need an active task on the current step — refresh the page if
+                you were just notified.
+              </>
+            )}
           </AlertDescription>
         </Alert>
       </div>

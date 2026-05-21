@@ -60,6 +60,8 @@ export interface Document {
   intake_file_name?: string | null;
   selected_workflow_template_id?: string | null;
   receive_recorded_at?: string | null;
+  /** Populated on GET /documents/:id for sender & recipients UI. */
+  recipients?: DocumentRecipient[];
 }
 
 export interface DocumentVersion {

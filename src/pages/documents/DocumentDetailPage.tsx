@@ -65,8 +65,18 @@ import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { documentTypeHeadline, stripFirstHtmlBlockMatchingTitle } from '@/utils/documentDisplay';
 import { correspondenceDirectionLabel } from '@/utils/correspondence';
 import { buildDocumentExportHtml, inlineExportImagesInHtml } from '@/utils/documentExport';
-import { roleDisplayLabel } from '@/utils/recipientPicker';
-import type { RecipientType } from '@/types/document';
+import {
+  buildRankFilterOptions,
+  groupDocumentRecipientsByType,
+  isReadOnlyDocumentRecipient,
+  RECIPIENT_TYPE_LABEL,
+  RECIPIENT_TYPE_ORDER,
+  recipientUserLabel,
+  roleDisplayLabel,
+  userMatchesRankFilter,
+} from '@/utils/recipientPicker';
+import { workflowAssigneeRoleLabel } from '@/utils/workflowEditor';
+import type { DocumentRecipient, RecipientType } from '@/types/document';
 import type { Role } from '@/types/auth';
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -171,6 +181,7 @@ export default function DocumentDetailPage() {
   const [recipientOpen, setRecipientOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [recipientRank, setRecipientRank] = useState('');
   const [recipientUserId, setRecipientUserId] = useState('');
   const [recipientType, setRecipientType] = useState<RecipientType>('to');
 
@@ -207,7 +218,7 @@ export default function DocumentDetailPage() {
   const { data: wfInstance } = useQuery({
     queryKey: QUERY_KEYS.workflowInstanceByDocument(id!),
     queryFn: () => workflowApi.getInstanceByDocumentId(id!),
-    enabled: documentIdValid && doc?.status === 'pending',
+    enabled: documentIdValid && doc?.delivery_mode === 'workflow',
     refetchOnMount: 'always',
   });
 
@@ -274,11 +285,32 @@ export default function DocumentDetailPage() {
     enabled: documentIdValid,
   });
 
-  const { data: recipients } = useQuery({
+  const { data: recipientsFromApi } = useQuery({
     queryKey: QUERY_KEYS.documentRecipients(id!),
     queryFn: () => documentsApi.listRecipients(id!),
     enabled: documentIdValid,
   });
+
+  const recipients = useMemo((): DocumentRecipient[] | undefined => {
+    if (recipientsFromApi?.length) return recipientsFromApi;
+    if (doc?.recipients?.length) return doc.recipients;
+    return recipientsFromApi ?? doc?.recipients;
+  }, [recipientsFromApi, doc?.recipients]);
+
+  const recipientsByType = useMemo(() => groupDocumentRecipientsByType(recipients), [recipients]);
+
+  const workflowToFallback = useMemo(() => {
+    if (doc?.delivery_mode !== 'workflow' || recipientsByType.to.length > 0) return null;
+    if (!wfInstance || !currentWorkflowStepDef) {
+      return 'Routed via workflow (no To tag at creation)';
+    }
+    const role = workflowAssigneeRoleLabel(currentWorkflowStepDef.assignee_role);
+    const stepName = String(currentWorkflowStepDef.name ?? '').trim();
+    if (stepName) {
+      return `${role} — current step: ${stepName}`;
+    }
+    return role;
+  }, [doc?.delivery_mode, recipientsByType.to.length, wfInstance, currentWorkflowStepDef]);
 
   const currentDirectMessageRecipientId = useMemo(() => {
     if (doc?.delivery_mode !== 'direct_message' || !recipients?.length) return null;
@@ -295,6 +327,18 @@ export default function DocumentDetailPage() {
     !!currentDirectMessageRecipientId &&
     doc?.delivery_mode === 'direct_message' &&
     currentDirectMessageRecipientId === user.user_id;
+
+  const isCcOrBccTagged = useMemo(
+    () => isReadOnlyDocumentRecipient(recipients, user?.user_id),
+    [recipients, user?.user_id]
+  );
+
+  /** Read-only only while CC/BCC and not also the workflow assignee or current DM To holder. */
+  const isReadOnlyRecipient = useMemo(
+    () =>
+      isCcOrBccTagged && !hasActiveWorkflowTaskForDoc && !isDirectMessageRecipient,
+    [isCcOrBccTagged, hasActiveWorkflowTaskForDoc, isDirectMessageRecipient]
+  );
 
   const directMessageAssignedAt = useMemo(() => {
     if (!recipients?.length || !user?.user_id) return null;
@@ -342,6 +386,29 @@ export default function DocumentDetailPage() {
 
   const userById = useMemo(() => new Map((users ?? []).map((u) => [u.id, u])), [users]);
 
+  const recipientCandidates = useMemo(() => {
+    const tagged = new Set((recipients ?? []).map((r) => r.user_id));
+    return (users ?? []).filter(
+      (u) => u.id !== user?.user_id && u.id !== doc?.owner_id && !tagged.has(u.id)
+    );
+  }, [users, recipients, user?.user_id, doc?.owner_id]);
+
+  const recipientRankOptions = useMemo(
+    () => buildRankFilterOptions(recipientCandidates, roles),
+    [recipientCandidates, roles]
+  );
+
+  const filteredRecipientCandidates = useMemo(() => {
+    if (!recipientRank.trim()) return recipientCandidates;
+    return recipientCandidates.filter((u) => userMatchesRankFilter(u, recipientRank, roles));
+  }, [recipientCandidates, recipientRank, roles]);
+
+  const resetRecipientPicker = () => {
+    setRecipientRank('');
+    setRecipientUserId('');
+    setRecipientType('to');
+  };
+
   /** Permissions context — mirror what the action toolbar uses so we can show the composer. */
   const docActionsAvailable = useMemo(() => {
     if (!doc) return null;
@@ -355,6 +422,7 @@ export default function DocumentDetailPage() {
         hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
         deliveryMode: doc.delivery_mode ?? null,
         isDirectMessageRecipient,
+        isReadOnlyRecipient,
       },
       workflowStepActionType
     );
@@ -366,6 +434,7 @@ export default function DocumentDetailPage() {
     hasActiveWorkflowTaskForDoc,
     workflowStepActionType,
     isDirectMessageRecipient,
+    isReadOnlyRecipient,
   ]);
 
   const canPostComment = !!docActionsAvailable?.canEditForward;
@@ -475,8 +544,7 @@ export default function DocumentDetailPage() {
       toast.success('Recipient added');
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentRecipients(id!) });
       setRecipientOpen(false);
-      setRecipientUserId('');
-      setRecipientType('to');
+      resetRecipientPicker();
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -598,6 +666,7 @@ export default function DocumentDetailPage() {
               hasActiveWorkflowTask: hasActiveWorkflowTaskForDoc,
               deliveryMode: doc.delivery_mode ?? null,
               isDirectMessageRecipient,
+              isReadOnlyRecipient,
             }}
             workflowInstanceId={workflowInstanceIdForActions}
             canAdvanceWorkflow={canAdvanceWorkflow}
@@ -607,6 +676,17 @@ export default function DocumentDetailPage() {
           />
         </div>
       </div>
+
+      {isReadOnlyRecipient ? (
+        <Alert className="border-slate-200 bg-slate-50/90 dark:border-slate-700 dark:bg-slate-950/40">
+          <AlertDescription className="text-sm text-slate-800 dark:text-slate-200">
+            You are tagged as <strong>CC</strong> or <strong>BCC</strong> for awareness only. You can view the memo,
+            recipients, attachments, and timeline, but you cannot act while you are only CC/BCC. If this process later
+            assigns you a workflow step or sends the direct message <strong>To</strong> you, you will be able to act
+            then.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {showReturnedForInfoHint ? (
         <Alert className="border-amber-200 bg-amber-50/90 dark:border-amber-900/50 dark:bg-amber-950/30">
@@ -667,41 +747,62 @@ export default function DocumentDetailPage() {
                         ) : null}
                       </dd>
                     </div>
-                    {(['to', 'cc', 'bcc'] as const).map((type) => {
-                      const group = (recipients ?? []).filter(
-                        (r) => (r.recipient_type ?? 'to').toLowerCase() === type
-                      );
-                      if (!group.length) return null;
+                    {RECIPIENT_TYPE_ORDER.map((type) => {
+                      const group = recipientsByType[type];
+                      const showWorkflowTo =
+                        type === 'to' && !group.length && doc.delivery_mode === 'workflow' && workflowToFallback;
+                      const showDmEmpty =
+                        type === 'to' &&
+                        !group.length &&
+                        !showWorkflowTo &&
+                        doc.delivery_mode === 'direct_message' &&
+                        !recipients?.length;
+                      const showTaggedEmpty =
+                        !group.length &&
+                        !showWorkflowTo &&
+                        !showDmEmpty &&
+                        (type === 'to'
+                          ? false
+                          : doc.delivery_mode === 'workflow' || (recipients?.length ?? 0) > 0);
+                      if (!group.length && !showWorkflowTo && !showDmEmpty && !showTaggedEmpty) {
+                        return null;
+                      }
                       return (
                         <div key={type} className="flex gap-4">
-                          <dt className="w-12 shrink-0 text-muted-foreground uppercase">{type}</dt>
+                          <dt className="w-12 shrink-0 text-muted-foreground">
+                            {RECIPIENT_TYPE_LABEL[type]}
+                          </dt>
                           <dd className="min-w-0 text-foreground leading-relaxed">
-                            {group.map((r, idx) => {
-                              const profile = userById.get(r.user_id);
-                              const name = userDisplayName(profile, resolveUsername(r.user_id));
-                              const context = userRoleContext(profile, roles);
-                              return (
-                                <span key={r.id}>
-                                  {idx > 0 ? ', ' : null}
-                                  <span className="capitalize">{name}</span>
-                                  {context ? (
-                                    <span className="text-muted-foreground"> ({context})</span>
-                                  ) : null}
-                                </span>
-                              );
-                            })}
+                            {group.length > 0 ? (
+                              group.map((r, idx) => {
+                                const profile = userById.get(r.user_id);
+                                const name = userDisplayName(profile, resolveUsername(r.user_id));
+                                const context = userRoleContext(profile, roles);
+                                return (
+                                  <span key={r.id ?? `${type}-${r.user_id}-${idx}`}>
+                                    {idx > 0 ? ', ' : null}
+                                    <span className="capitalize">{name}</span>
+                                    {context ? (
+                                      <span className="text-muted-foreground"> ({context})</span>
+                                    ) : null}
+                                  </span>
+                                );
+                              })
+                            ) : showWorkflowTo ? (
+                              <span className="text-muted-foreground italic">{workflowToFallback}</span>
+                            ) : showDmEmpty ? (
+                              <span className="text-muted-foreground italic">No recipients tagged yet</span>
+                            ) : showTaggedEmpty ? (
+                              <span className="text-muted-foreground italic">—</span>
+                            ) : null}
                           </dd>
                         </div>
                       );
                     })}
-                    {!recipients?.length && (
+                    {!recipients?.length && doc.delivery_mode !== 'workflow' && doc.delivery_mode !== 'direct_message' && (
                       <div className="flex gap-4">
                         <dt className="w-12 shrink-0 text-muted-foreground">To</dt>
-                        <dd className="text-muted-foreground italic">
-                          {doc.delivery_mode === 'direct_message'
-                            ? 'No recipients tagged yet'
-                            : 'None'}
-                        </dd>
+                        <dd className="text-muted-foreground italic">None</dd>
                       </div>
                     )}
                   </dl>
@@ -863,29 +964,87 @@ export default function DocumentDetailPage() {
         </aside>
       </div>
 
-      <Dialog open={recipientOpen} onOpenChange={setRecipientOpen}>
-        <DialogContent>
+      <Dialog
+        open={recipientOpen}
+        onOpenChange={(open) => {
+          setRecipientOpen(open);
+          if (!open) resetRecipientPicker();
+        }}
+      >
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Add recipient</DialogTitle>
+            <DialogDescription>
+              Pick a rank or role first, then choose the staff member. Each option shows name, rank, and
+              department.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>User</Label>
-              <Select value={recipientUserId} onValueChange={setRecipientUserId}>
+              <Label>
+                Rank / role <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={recipientRank.trim() || '__none__'}
+                onValueChange={(v) => {
+                  setRecipientRank(v === '__none__' ? '' : v);
+                  setRecipientUserId('');
+                }}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select user" />
+                  <SelectValue placeholder="Select rank / role first" />
                 </SelectTrigger>
                 <SelectContent>
-                  {users?.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.username}
+                  <SelectItem value="__none__">Select rank / role…</SelectItem>
+                  {recipientRankOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!recipientRankOptions.length && recipientCandidates.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No rank or role could be derived from the directory. Ask an admin to set rank or roles on user
+                  profiles.
+                </p>
+              )}
             </div>
+
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label>
+                Staff member <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={recipientUserId || '__none__'}
+                disabled={!recipientRank.trim()}
+                onValueChange={(v) => setRecipientUserId(v === '__none__' ? '' : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      recipientRank.trim()
+                        ? 'Select user (name · rank · department)'
+                        : 'Choose rank / role first'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  <SelectItem value="__none__">Select user</SelectItem>
+                  {filteredRecipientCandidates.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {recipientUserLabel(u, roles)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {recipientRank.trim() && !filteredRecipientCandidates.length && (
+                <p className="text-xs text-muted-foreground">No users with this rank in the directory.</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Tag as</Label>
               <Select
                 value={recipientType}
                 onValueChange={(v) => setRecipientType(v as RecipientType)}
@@ -907,10 +1066,10 @@ export default function DocumentDetailPage() {
             </Button>
             <Button
               loading={addRecipientMutation.isPending}
-              disabled={!recipientUserId}
+              disabled={!recipientRank.trim() || !recipientUserId}
               onClick={() => addRecipientMutation.mutate()}
             >
-              Add
+              Add recipient
             </Button>
           </DialogFooter>
         </DialogContent>
