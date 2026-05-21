@@ -22,7 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Skeleton } from '@/components/shared/Skeleton';
-import { AuditTimeline } from '@/components/audit/AuditTimeline';
+import { DashboardAuditActivityCard } from '@/components/dashboard/DashboardAuditActivityCard';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
 import { TaskStatusBadge } from '@/components/tasks/TaskStatusBadge';
 import { useAuthStore } from '@/stores/authStore';
@@ -737,22 +737,16 @@ function ExecutiveIntelligenceDashboard({ variant }: { variant: ExecutiveVariant
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            {canRecentAudit ? 'System activity' : 'Your audit trail'}
-          </CardTitle>
-          {showAuditLogPage && (
-            <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/audit')}>
-              Full audit <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          <AuditTimeline logs={(recentAudit ?? []).slice(0, 8)} loading={auditLoading} compact />
-        </CardContent>
-      </Card>
+      <DashboardAuditActivityCard
+        title={canRecentAudit ? 'System activity' : 'Your audit trail'}
+        logs={recentAudit ?? []}
+        loading={auditLoading}
+        limit={10}
+        showFullAuditLink={showAuditLogPage}
+        onOpenFullAudit={showAuditLogPage ? () => navigate('/audit') : undefined}
+        emptyTitle="No audit events"
+        emptyDescription="No activity recorded in the selected period."
+      />
     </div>
   );
 }
@@ -920,22 +914,14 @@ function OfficerDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="h-4 w-4 text-primary" />
-                Activity
-              </CardTitle>
-              {showAuditLogPage && (
-                <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
-                  Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              <AuditTimeline logs={activityFeed.slice(0, 16)} loading={loading} compact />
-            </CardContent>
-          </Card>
+          <DashboardAuditActivityCard
+            title="Recent activity"
+            logs={activityFeed}
+            loading={loading}
+            limit={12}
+            showFullAuditLink={showAuditLogPage}
+            onOpenFullAudit={showAuditLogPage ? () => navigate('/audit') : undefined}
+          />
 
           {docs.filter((d) => d.status === 'draft' || d.status === 'pending').length > 0 && (
             <Card>
@@ -1252,23 +1238,14 @@ function UserDashboard({ documentScope = 'all' }: { documentScope?: 'mine' | 'al
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Recent activity</CardTitle>
-          {showAuditLogPage && (
-            <Button variant="ghost" size="sm" onClick={() => navigate('/audit')} className="text-xs">
-              Full audit log <ArrowRight className="h-3.5 w-3.5 ml-1" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          <AuditTimeline
-            logs={activityFeed.slice(0, 12)}
-            loading={auditLoading || myDocsLoading || tasksLoading}
-            compact
-          />
-        </CardContent>
-      </Card>
+      <DashboardAuditActivityCard
+        title="Recent activity"
+        logs={activityFeed}
+        loading={auditLoading || myDocsLoading || tasksLoading}
+        limit={12}
+        showFullAuditLink={showAuditLogPage}
+        onOpenFullAudit={showAuditLogPage ? () => navigate('/audit') : undefined}
+      />
     </div>
   );
 }

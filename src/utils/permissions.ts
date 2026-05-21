@@ -13,6 +13,8 @@ export type DocumentActionContext = {
   deliveryMode?: DocumentDeliveryMode | null;
   /** True when the current user is listed in document recipients (direct message path). */
   isDirectMessageRecipient?: boolean;
+  /** Tagged as CC/BCC only — view document and timeline; no edits or workflow actions. */
+  isReadOnlyRecipient?: boolean;
 };
 
 /** Normalize `workflow_templates.steps[].action_type` for comparisons. */
@@ -52,6 +54,25 @@ export function getDocumentActions(
   const isDraftOwner = Boolean(uid && oid && uid === oid);
 
   const dm = context.deliveryMode === 'direct_message';
+  /** CC/BCC-only unless they also hold the active workflow step or the direct-message baton. */
+  const isReadOnlyRecipient =
+    context.isReadOnlyRecipient === true &&
+    context.hasActiveWorkflowTask !== true &&
+    context.isDirectMessageRecipient !== true;
+
+  if (isReadOnlyRecipient) {
+    return {
+      canEdit: false,
+      canSubmit: false,
+      canFinalApprove: false,
+      canReject: false,
+      canArchive: false,
+      canEditForward: false,
+      canApproveForward: false,
+      canRequestInfo: false,
+    };
+  }
+
   const isDmRecipient =
     status === 'pending' &&
     dm &&

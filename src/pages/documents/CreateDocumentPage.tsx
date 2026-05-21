@@ -414,6 +414,8 @@ export default function CreateDocumentPage() {
         toast.success('Draft saved');
       }
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.allDocuments] });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.document(docId) });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentRecipients(docId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.workflowInstanceByDocument(docId) });
       navigate(`/documents/${docId}`);
     },

@@ -1,5 +1,6 @@
 import type { UserRecord } from '@/api/auth';
 import type { Role } from '@/types/auth';
+import type { RecipientType } from '@/types/document';
 
 /** Human label for a grade / RBAC role (same idea as Users admin). */
 export function roleDisplayLabel(role: Pick<Role, 'name' | 'description'>): string {
@@ -109,6 +110,45 @@ export function buildRankFilterOptions(
   fromAssignments.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 
   return [...ordered, ...extras, ...fromAssignments];
+}
+
+export const RECIPIENT_TYPE_ORDER: RecipientType[] = ['to', 'cc', 'bcc'];
+
+export const RECIPIENT_TYPE_LABEL: Record<RecipientType, string> = {
+  to: 'To',
+  cc: 'CC',
+  bcc: 'BCC',
+};
+
+/** Normalize DB / API recipient_type values for grouping. */
+export function normalizeRecipientType(value: RecipientType | string | null | undefined): RecipientType | null {
+  const t = String(value ?? 'to').toLowerCase();
+  if (t === 'to' || t === 'cc' || t === 'bcc') return t;
+  return null;
+}
+
+export function groupDocumentRecipientsByType<T extends { user_id: string; recipient_type?: RecipientType | string }>(
+  recipients: T[] | undefined
+): Record<RecipientType, T[]> {
+  const grouped: Record<RecipientType, T[]> = { to: [], cc: [], bcc: [] };
+  for (const row of recipients ?? []) {
+    const type = normalizeRecipientType(row.recipient_type);
+    if (type) grouped[type].push(row);
+  }
+  return grouped;
+}
+
+/**
+ * True when the user is tagged only as CC and/or BCC (no To row) on this document.
+ */
+export function isReadOnlyDocumentRecipient(
+  recipients: { user_id: string; recipient_type?: RecipientType | string }[] | undefined,
+  userId: string | undefined | null
+): boolean {
+  if (!userId?.trim() || !recipients?.length) return false;
+  const mine = recipients.filter((r) => r.user_id === userId);
+  if (!mine.length) return false;
+  return !mine.some((r) => String(r.recipient_type ?? 'to').toLowerCase() === 'to');
 }
 
 export function recipientUserLabel(u: UserRecord, roleCatalogue: Role[] | undefined): string {
