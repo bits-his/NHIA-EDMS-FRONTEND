@@ -71,15 +71,37 @@ export const notificationClient = createClient(URLS.notification);
 export const searchOcrClient = createClient(URLS.searchOcr);
 
 // Helper to extract error message from backend error shape
+const FIELD_LABEL_HINTS: Record<string, string> = {
+  correspondence_direction: 'Correspondence (incoming or outgoing)',
+  department: 'Department',
+  title: 'Subject / title',
+  content: 'Cover notes',
+  file: 'Document file',
+};
+
+/** Turn bare Zod/API "Required" into a clearer phrase when a field name is known. */
+function humanizeApiDetail(detail: string): string {
+  if (!detail || detail === 'Required') {
+    return 'A required field is missing. Check the form and try again.';
+  }
+  if (detail === 'Bad Request') return detail;
+  for (const [key, label] of Object.entries(FIELD_LABEL_HINTS)) {
+    if (detail === key || detail === `${key}: Required` || detail.startsWith(`${key}:`)) {
+      return detail.replace(key, label).replace(': Required', ' is required');
+    }
+  }
+  return detail.replace(/: Required\b/g, ' is required').replace(/^Required$/i, 'A required field is missing');
+}
+
 export function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data;
-    if (data?.detail) return data.detail;
-    if (data?.error) return data.error;
-    if (data?.message) return data.message;
+    if (data?.detail) return humanizeApiDetail(String(data.detail));
+    if (data?.error) return humanizeApiDetail(String(data.error));
+    if (data?.message) return humanizeApiDetail(String(data.message));
     return error.message;
   }
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return humanizeApiDetail(error.message);
   return 'An unexpected error occurred';
 }
 

@@ -58,6 +58,8 @@ export const documentsApi = {
       correspondence_direction: CorrespondenceDirection;
       tracking_id?: string;
       urgency?: DocumentUrgency;
+      /** Cover note / summary (plain text or HTML). */
+      content?: string;
     } & Partial<DocumentCreationProfile>
   ): Promise<CreateDocumentResponse> => {
     const form = new FormData();
@@ -65,6 +67,9 @@ export const documentsApi = {
     form.append('title', title);
     form.append('department', department);
     form.append('correspondence_direction', options?.correspondence_direction ?? 'incoming');
+    if (options?.content?.trim()) {
+      form.append('content', options.content.trim());
+    }
     if (options?.ref_number?.trim()) {
       form.append('ref_number', options.ref_number.trim());
     }
@@ -89,8 +94,9 @@ export const documentsApi = {
     if (options?.intake_file_name?.trim()) {
       form.append('intake_file_name', options.intake_file_name.trim());
     }
-    if (options?.selected_workflow_template_id?.trim()) {
-      form.append('selected_workflow_template_id', options.selected_workflow_template_id.trim());
+    const wfTpl = options?.selected_workflow_template_id?.trim();
+    if (wfTpl && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wfTpl)) {
+      form.append('selected_workflow_template_id', wfTpl);
     }
     const res = await documentClient.post<CreateDocumentResponse>('/documents/upload', form);
     return res.data;
@@ -189,6 +195,18 @@ export const documentsApi = {
 
   downloadAttachmentBlob: async (documentId: string, attachmentId: string): Promise<Blob> => {
     const res = await documentClient.get<Blob>(`/documents/${documentId}/attachments/${attachmentId}`, {
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+
+  deleteAttachment: async (documentId: string, attachmentId: string): Promise<void> => {
+    await documentClient.delete(`/documents/${documentId}/attachments/${attachmentId}`);
+  },
+
+  /** Uploaded PDF/DOCX for external correspondence (primary file). */
+  downloadPrimaryFileBlob: async (documentId: string): Promise<Blob> => {
+    const res = await documentClient.get<Blob>(`/documents/${documentId}/primary-file`, {
       responseType: 'blob',
     });
     return res.data;

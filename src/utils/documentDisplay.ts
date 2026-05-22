@@ -7,6 +7,22 @@ export function documentTypeHeadline(doc: Document): string {
   return doc.title;
 }
 
+/** Plain cover notes from the create form → safe HTML for storage and display. */
+export function externalNotesToHtml(notes: string): string {
+  const t = notes.trim();
+  if (!t) return '';
+  if (/<[a-z][\s\S]*>/i.test(t)) return t;
+  const escaped = t
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<p>${escaped.replace(/\n/g, '<br/>')}</p>`;
+}
+
+export function isPdfFilename(filename: string | null | undefined): boolean {
+  return String(filename ?? '').toLowerCase().endsWith('.pdf');
+}
+
 export function shouldShowTemplateTitleAsSubtitle(doc: Document): boolean {
   if (!doc.title?.trim()) return false;
   return doc.category === 'internal_memo' || doc.category === 'external_correspondence';

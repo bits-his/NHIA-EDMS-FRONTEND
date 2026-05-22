@@ -13,6 +13,7 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { formatRelative } from '@/utils/formatters';
 import { getErrorMessage } from '@/api/client';
 import { cn } from '@/utils/cn';
+import { notificationTypeLabel } from '@/utils/notificationDisplay';
 import type { Notification } from '@/types/notification';
 
 type FilterMode = 'all' | 'unread';
@@ -103,7 +104,9 @@ export default function NotificationsPage() {
         />
       ) : (
         <div className="space-y-2">
-          {filtered.map((n) => (
+          {filtered.map((n) => {
+            const typeLabel = notificationTypeLabel(n.type);
+            return (
             <div
               key={n.id}
               className={cn(
@@ -127,9 +130,9 @@ export default function NotificationsPage() {
                   {n.message}
                 </p>
                 <div className="flex items-center gap-2.5 mt-1.5 flex-wrap">
-                  {n.type && (
-                    <span className="text-[10px] font-medium bg-muted px-2 py-0.5 rounded-full text-muted-foreground capitalize">
-                      {n.type.replace('.', ' › ')}
+                  {typeLabel && (
+                    <span className="text-[10px] font-medium bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
+                      {typeLabel}
                     </span>
                   )}
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -152,7 +155,8 @@ export default function NotificationsPage() {
                 </Button>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>
