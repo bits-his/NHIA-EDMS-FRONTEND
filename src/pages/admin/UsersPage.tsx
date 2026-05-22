@@ -251,6 +251,10 @@ function userTableRowBg(idx: number) {
   return idx % 2 !== 0 ? 'bg-slate-50 dark:bg-muted/40' : 'bg-white dark:bg-card';
 }
 
+function roleTableRowBg(idx: number) {
+  return userTableRowBg(idx);
+}
+
 function userMatchesSearch(u: UserRecord, query: string, allRoles: Role[] | undefined): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -615,6 +619,127 @@ function UsersTable({
   );
 }
 
+function RolesPermissionsTable({
+  roles,
+  canManageRoles,
+  onEditPermissions,
+}: {
+  roles: Role[];
+  canManageRoles: boolean;
+  onEditPermissions: (role: Role) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [actionsOverlap, setActionsOverlap] = useState(false);
+
+  const updateActionsOverlap = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setActionsOverlap(el.scrollWidth > el.clientWidth + 1);
+  }, []);
+
+  useEffect(() => {
+    updateActionsOverlap();
+    const el = scrollRef.current;
+    if (!el) return undefined;
+
+    const ro = new ResizeObserver(() => updateActionsOverlap());
+    ro.observe(el);
+    window.addEventListener('resize', updateActionsOverlap);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateActionsOverlap);
+    };
+  }, [roles.length, updateActionsOverlap]);
+
+  const stickyTh = cn(STICKY_ACTIONS_BASE_TH, actionsOverlap && STICKY_ACTIONS_OVERLAP);
+  const stickyTd = cn(STICKY_ACTIONS_BASE_TD, actionsOverlap && STICKY_ACTIONS_OVERLAP);
+
+  return (
+    <div ref={scrollRef} className="overflow-x-auto">
+      <table className="w-full text-sm table-fixed min-w-[72rem]">
+        <thead>
+          <tr className="border-b border-border bg-muted/30">
+            <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[11rem] min-w-[11rem]">
+              Role
+            </th>
+            {ALL_PERMISSIONS.map((p) => (
+              <th
+                key={p}
+                className="text-center px-1.5 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-[4.25rem] leading-tight"
+              >
+                {p.replace(/_/g, ' ')}
+              </th>
+            ))}
+            <th
+              className={cn(
+                'text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[8.5rem] min-w-[8.5rem]',
+                canManageRoles && stickyTh
+              )}
+            >
+              {canManageRoles ? 'Actions' : ''}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {roles.map((role, idx) => {
+            const rowBg = roleTableRowBg(idx);
+            return (
+              <tr
+                key={role.id}
+                className={cn(
+                  'border-b border-border/50 last:border-0 hover:bg-muted/30',
+                  rowBg
+                )}
+              >
+                <td className="px-4 py-3.5 align-top w-[11rem] min-w-[11rem]">
+                  <span
+                    className={cn(
+                      'inline-block text-xs font-semibold px-2.5 py-1 rounded-full capitalize max-w-full truncate',
+                      ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground'
+                    )}
+                    title={roleDisplayLabel(role)}
+                  >
+                    {roleDisplayLabel(role)}
+                  </span>
+                </td>
+                {ALL_PERMISSIONS.map((p) => (
+                  <td key={p} className="text-center px-1.5 py-3.5 w-[4.25rem]">
+                    {permissionHas(role.permissions ?? [], p) ? (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">
+                        ✓
+                      </span>
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/40 text-xs mx-auto">
+                        —
+                      </span>
+                    )}
+                  </td>
+                ))}
+                <td
+                  className={cn(
+                    'px-4 py-3.5 text-right align-top w-[8.5rem] min-w-[8.5rem]',
+                    canManageRoles && stickyTd,
+                    canManageRoles && rowBg
+                  )}
+                >
+                  {canManageRoles ? (
+                    <Button size="sm" variant="outline" onClick={() => onEditPermissions(role)}>
+                      <Edit className="h-3.5 w-3.5" />
+                      Edit permissions
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function UsersPage() {
   const navigate = useNavigate();
@@ -834,7 +959,7 @@ export default function UsersPage() {
 
         <TabsContent value="permissions" className="mt-0 space-y-3">
           <Card>
-            <CardContent className="p-0 overflow-x-auto">
+            <CardContent className="p-0 border-t border-border">
               {rolesLoading ? (
                 <div className="p-5 space-y-2">
                   {[1, 2, 3].map((i) => (
@@ -842,74 +967,11 @@ export default function UsersPage() {
                   ))}
                 </div>
               ) : (
-                <table className="w-full text-sm table-fixed">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/30">
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[11rem] min-w-[11rem]">
-                        Role
-                      </th>
-                      {ALL_PERMISSIONS.map((p) => (
-                        <th
-                          key={p}
-                          className="text-center px-1.5 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-[4.25rem] leading-tight"
-                        >
-                          {p.replace(/_/g, ' ')}
-                        </th>
-                      ))}
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[8.5rem]">
-                        {canManageRoles ? 'Actions' : ''}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(allRoles ?? []).map((role, idx) => {
-                      return (
-                        <tr
-                          key={role.id}
-                          className={cn(
-                            'border-b border-border/50 last:border-0',
-                            idx % 2 !== 0 && 'bg-muted/20'
-                          )}
-                        >
-                          <td className="px-4 py-3.5 align-top w-[11rem] min-w-[11rem]">
-                            <span
-                              className={cn(
-                                'inline-block text-xs font-semibold px-2.5 py-1 rounded-full capitalize max-w-full truncate',
-                                ROLE_COLORS[role.name] ?? 'bg-muted text-muted-foreground'
-                              )}
-                              title={roleDisplayLabel(role)}
-                            >
-                              {roleDisplayLabel(role)}
-                            </span>
-                          </td>
-                          {ALL_PERMISSIONS.map((p) => (
-                            <td key={p} className="text-center px-1.5 py-3.5 w-[4.25rem]">
-                              {permissionHas(role.permissions ?? [], p) ? (
-                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold mx-auto">
-                                  ✓
-                                </span>
-                              ) : (
-                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground/40 text-xs mx-auto">
-                                  —
-                                </span>
-                              )}
-                            </td>
-                          ))}
-                          <td className="px-4 py-3.5 text-right align-top w-[8.5rem]">
-                            {canManageRoles ? (
-                              <Button size="sm" variant="outline" onClick={() => setEditPermRole(role)}>
-                                <Edit className="h-3.5 w-3.5" />
-                                Edit permissions
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <RolesPermissionsTable
+                  roles={allRoles ?? []}
+                  canManageRoles={canManageRoles}
+                  onEditPermissions={setEditPermRole}
+                />
               )}
             </CardContent>
           </Card>
