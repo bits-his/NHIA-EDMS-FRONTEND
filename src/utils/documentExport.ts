@@ -31,33 +31,10 @@ export interface DocumentExportInput {
   usernameFor?: (userId: string | null | undefined) => string;
 }
 
-const DELIVERY_LABEL: Record<string, string> = {
-  workflow: 'Workflow',
-  direct_message: 'Direct message',
-};
-
-const CATEGORY_LABEL: Record<string, string> = {
-  internal_memo: 'Internal memo',
-  external_correspondence: 'External correspondence',
-};
-
 const RECIPIENT_TYPE_LABEL: Record<string, string> = {
   to: 'To',
   cc: 'CC',
   bcc: 'BCC',
-};
-
-const URGENCY_LABEL: Record<string, string> = {
-  normal: 'Normal',
-  urgent: 'Urgent',
-  very_urgent: 'Very urgent',
-};
-
-const CLASSIFICATION_LABEL: Record<string, string> = {
-  normal: 'Normal',
-  important: 'Important',
-  secret: 'Secret',
-  top_secret: 'Top secret',
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -138,15 +115,6 @@ function actorContext(a: DocumentWorkflowAction): string {
 
 function actionLabel(action: string): string {
   return ACTION_LABEL[action] ?? action.replace(/_/g, ' ');
-}
-
-function renderMetaList(items: Array<[string, string | null | undefined]>): string {
-  return items
-    .map(
-      ([label, value]) =>
-        `<div class="meta-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '—')}</dd></div>`
-    )
-    .join('');
 }
 
 function renderRecipients(
@@ -241,54 +209,38 @@ function renderVersions(versions: DocumentVersion[] | undefined): string {
   return `<ul class="list">${rows}</ul>`;
 }
 
+function primaryFileLabel(doc: Document): string | null {
+  if (doc.category !== 'external_correspondence') return null;
+  const name = doc.original_filename?.trim() || doc.intake_file_name?.trim();
+  return name || null;
+}
+
 function additionalSectionsHtml({
   doc,
   recipients,
   attachments,
   actions,
   versions,
-  ownerName,
   usernameFor,
 }: DocumentExportInput): string {
-  const profileMeta: Array<[string, string | null | undefined]> = [
-    ['Reference number', doc.ref_number],
-    ['Status', doc.status_label || doc.status],
-    ['Category', doc.category ? CATEGORY_LABEL[doc.category] ?? doc.category : null],
-    ['Department', doc.department],
-    ['Urgency', doc.urgency ? URGENCY_LABEL[doc.urgency] ?? doc.urgency : null],
-    [
-      'Classification',
-      doc.file_classification ? CLASSIFICATION_LABEL[doc.file_classification] ?? doc.file_classification : null,
-    ],
-    ['Delivery mode', doc.delivery_mode ? DELIVERY_LABEL[doc.delivery_mode] ?? doc.delivery_mode : null],
-    [
-      'Input mode',
-      doc.input_mode ? (doc.input_mode === 'template' ? 'Template' : 'Manual entry') : null,
-    ],
-    ['Effective date', doc.document_effective_date ? safeFormatDate(doc.document_effective_date, 'PP') : null],
-    ['Received', doc.receive_recorded_at ? safeFormatDate(doc.receive_recorded_at, 'PP p') : null],
-    ['Created', safeFormatDate(doc.created_at, 'PP p')],
-    ['Last updated', safeFormatDate(doc.updated_at, 'PP p')],
-    ['Owner', ownerName],
-  ];
-
-  const profileBlock = renderMetaList(profileMeta);
   const recipientsBlock = renderRecipients(recipients, usernameFor);
   const attachmentsBlock = renderAttachments(attachments, usernameFor);
   const activityBlock = renderActions(actions, usernameFor);
   const versionsBlock = renderVersions(versions);
 
+  const primaryFile = primaryFileLabel(doc);
+  const primaryFileBlock = primaryFile
+    ? `<section class="export-section"><h2>Uploaded file</h2><p class="primary-file-name">${escapeHtml(primaryFile)}</p></section>`
+    : '';
+
   return `
-    <section class="export-section export-meta-section">
-      <h2>Document profile</h2>
-      <dl class="meta-grid">${profileBlock}</dl>
-    </section>
+    ${primaryFileBlock}
     <section class="export-section">
       <h2>Recipients</h2>
       ${recipientsBlock}
     </section>
     <section class="export-section">
-      <h2>Attachments</h2>
+      <h2>Supporting attachments</h2>
       ${attachmentsBlock}
     </section>
     <section class="export-section">
@@ -307,14 +259,24 @@ function additionalSectionsHtml({
 function bodyShell(doc: Document, bodyHtml: string): string {
   const title = escapeHtml(doc.title || 'Untitled document');
   const refLine = doc.ref_number ? `<p class="ref">Ref: ${escapeHtml(doc.ref_number)}</p>` : '';
+  const primaryName = primaryFileLabel(doc);
+  const primaryLine = primaryName
+    ? `<p class="primary-file">File: <strong>${escapeHtml(primaryName)}</strong></p>`
+    : '';
+  const trackingLine =
+    doc.category === 'external_correspondence' && doc.tracking_id
+      ? `<p class="ref">Tracking: ${escapeHtml(doc.tracking_id)}</p>`
+      : '';
   const logoSrc = escapeHtml(NHIA_LOGO_SRC);
   return `
     <header class="doc-header">
       <img class="export-doc-logo" src="${logoSrc}" alt="NHIA" />
       <h1>${title}</h1>
       ${refLine}
+      ${trackingLine}
+      ${primaryLine}
     </header>
-    <article class="doc-body">${bodyHtml || '<p class="empty">No body content.</p>'}</article>
+    <article class="doc-body">${bodyHtml || '<p class="empty">No cover notes entered.</p>'}</article>
   `;
 }
 
@@ -330,7 +292,10 @@ const EXPORT_STYLES = `
   .toolbar button.primary:hover { background: #111827; }
   .export-doc-logo { display: block; height: 44px; width: auto; max-width: 260px; object-fit: contain; margin: 0 0 14px; }
   .doc-header h1 { font-size: 22px; margin: 0 0 4px; color: #111827; }
-  .doc-header .ref { margin: 0 0 16px; color: #6b7280; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .doc-header .ref { margin: 0 0 8px; color: #6b7280; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .doc-header .primary-file { margin: 0 0 16px; font-size: 14px; color: #111827; }
+  .doc-header .primary-file strong { font-weight: 600; }
+  .primary-file-name { font-size: 15px; font-weight: 600; color: #111827; margin: 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; }
   .doc-body { font-size: 14px; line-height: 1.55; }
   .doc-body p, .doc-body li { line-height: 1.55; }
   .export-section { margin-top: 32px; }

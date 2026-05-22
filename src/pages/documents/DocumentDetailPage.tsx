@@ -13,6 +13,7 @@ import {
   Zap,
   Upload,
   Download,
+  Trash2,
   GitBranch,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -36,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { Skeleton } from '@/components/shared/Skeleton';
 import { DocumentStatusBadge } from '@/components/documents/StatusBadge';
@@ -43,6 +45,7 @@ import { DocumentActions } from '@/components/documents/DocumentActions';
 import { DocumentActivitySidebar } from '@/components/documents/DocumentActivitySidebar';
 import { DocumentCommentsSection } from '@/components/documents/DocumentCommentsSection';
 import { DocumentDiscussionsPanel } from '@/components/documents/DocumentDiscussionsPanel';
+import { ExternalPrimaryFileViewer } from '@/components/documents/ExternalPrimaryFileViewer';
 import { WorkflowBpmnPanel } from '@/components/documents/WorkflowBpmnPanel';
 import { documentsApi } from '@/api/documents';
 import { authApi, type UserRecord } from '@/api/auth';
@@ -184,6 +187,10 @@ export default function DocumentDetailPage() {
   const [recipientRank, setRecipientRank] = useState('');
   const [recipientUserId, setRecipientUserId] = useState('');
   const [recipientType, setRecipientType] = useState<RecipientType>('to');
+  const [attachmentToDelete, setAttachmentToDelete] = useState<{
+    id: string;
+    filename: string;
+  } | null>(null);
 
   const documentIdValid = !!id && isUuid(id);
 
@@ -472,14 +479,9 @@ export default function DocumentDetailPage() {
   const canUploadAttachment = isOwner && (doc?.status === 'draft' || doc?.status === 'pending');
 
   /**
-   * Build a single printable HTML view that captures EVERYTHING on the page:
-   * NHIA letterhead (when available), document body, profile metadata,
-   * recipients, attachments, comments / activity timeline, and versions.
-   * The user can print or save as PDF from the new tab's toolbar.
-   *
-   * For internal memos we fetch the server letterhead so the export keeps the
-   * official banner; otherwise we render a standalone shell that still includes
-   * the title and body, plus all of the additional sections.
+   * Build a single printable HTML view: letterhead (internal memos when available),
+   * body, recipients, supporting attachments, activity timeline, and versions.
+   * External correspondence also shows the uploaded primary filename in the export header.
    */
   const exportMutation = useMutation({
     mutationFn: async (): Promise<string | null> => {
@@ -555,6 +557,16 @@ export default function DocumentDetailPage() {
       toast.success('Attachment uploaded');
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentAttachments(id!) });
       if (fileInputRef.current) fileInputRef.current.value = '';
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: (attachmentId: string) => documentsApi.deleteAttachment(id!, attachmentId),
+    onSuccess: () => {
+      toast.success('Attachment removed');
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentAttachments(id!) });
+      setAttachmentToDelete(null);
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -817,15 +829,39 @@ export default function DocumentDetailPage() {
                     <FileText className="h-3.5 w-3.5" />
                     {doc.category === 'external_correspondence' ? 'Body / notes' : 'Body'}
                   </h3>
-                  {doc.category === 'external_correspondence' && doc.original_filename && (
-                    <Alert variant="info" className="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20">
-                      <FileText className="h-4 w-4" />
-                      <AlertDescription>
-                        Primary file: <strong>{doc.original_filename}</strong> (stored on server).
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {hasBodyText ? (
+                  {doc.category === 'external_correspondence' ? (
+                    <>
+                      {hasBodyText ? (
+                        <div className="rounded-lg border border-border/60 bg-background overflow-hidden">
+                          <div
+                            className="prose prose-sm max-w-none px-5 py-4 text-foreground whitespace-pre-wrap"
+                            dangerouslySetInnerHTML={{
+                              __html: bodyHtml,
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground italic py-2">
+                          No cover notes were entered for this document.
+                        </p>
+                      )}
+                      {doc.file_path ? (
+                        <div className="space-y-2 pt-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Uploaded file
+                          </p>
+                          <ExternalPrimaryFileViewer
+                            documentId={doc.id}
+                            filename={
+                              doc.original_filename?.trim() ||
+                              doc.intake_file_name?.trim() ||
+                              'Uploaded document'
+                            }
+                          />
+                        </div>
+                      ) : null}
+                    </>
+                  ) : hasBodyText ? (
                     <div className="rounded-lg border border-border/60 bg-background overflow-hidden">
                       <div
                         className="prose prose-sm max-w-none px-5 py-4 text-foreground [&_.nhia-approve-forward-stamp]:not-prose [&_.nhia-approve-forward-stamp]:flex [&_.nhia-approve-forward-stamp]:flex-col [&_.nhia-approve-forward-stamp]:gap-1.5 [&_.nhia-approve-forward-stamp_p]:my-0 [&_.nhia-approve-forward-name]:font-semibold [&_.nhia-approve-forward-name]:text-sm [&_.nhia-approve-forward-rank]:text-sm [&_.nhia-approve-forward-dept-zone]:text-sm [&_.nhia-approve-forward-sig]:max-h-[72px]"
@@ -836,10 +872,6 @@ export default function DocumentDetailPage() {
                         }}
                       />
                     </div>
-                  ) : doc.category === 'external_correspondence' ? (
-                    <p className="text-sm text-muted-foreground italic py-2">
-                      No notes were entered. The uploaded file above is the primary content.
-                    </p>
                   ) : (
                     <p className="text-sm text-muted-foreground italic py-2">
                       No body text was entered. Edit the document to add memo content.
@@ -891,14 +923,33 @@ export default function DocumentDetailPage() {
                             <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             {a.filename}
                           </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="shrink-0"
-                            onClick={() => downloadAttachment(a.id, a.filename)}
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Download ${a.filename}`}
+                              onClick={() => downloadAttachment(a.id, a.filename)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            {canUploadAttachment && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                aria-label={`Remove ${a.filename}`}
+                                loading={
+                                  deleteAttachmentMutation.isPending &&
+                                  attachmentToDelete?.id === a.id
+                                }
+                                onClick={() =>
+                                  setAttachmentToDelete({ id: a.id, filename: a.filename })
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -958,8 +1009,9 @@ export default function DocumentDetailPage() {
             Export document
           </Button>
           <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
-            Opens a printable view with letterhead (internal memos), body, profile, recipients,
-            attachments, and the full activity timeline. Use your browser print dialog to save as PDF.
+            Opens a printable view with letterhead (internal memos), body, recipients, supporting
+            attachments, and the full activity timeline. External correspondence includes the uploaded
+            file name. Use your browser print dialog to save as PDF.
           </p>
         </aside>
       </div>
@@ -1155,6 +1207,25 @@ export default function DocumentDetailPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <ConfirmDialog
+        open={!!attachmentToDelete}
+        onOpenChange={(open) => {
+          if (!open) setAttachmentToDelete(null);
+        }}
+        title="Remove attachment?"
+        description={
+          attachmentToDelete
+            ? `“${attachmentToDelete.filename}” will be removed from this document.`
+            : ''
+        }
+        confirmLabel="Remove"
+        variant="destructive"
+        loading={deleteAttachmentMutation.isPending}
+        onConfirm={() => {
+          if (attachmentToDelete) deleteAttachmentMutation.mutate(attachmentToDelete.id);
+        }}
+      />
 
       {/**
        * Floating discussions widget — anchored to the viewport so users can pop

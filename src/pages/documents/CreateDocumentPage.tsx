@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,7 +7,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { ArrowLeft, Upload, User } from 'lucide-react';
+import { AlertCircle, ArrowLeft, FileText, Upload, User, X } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import MemoEditor from '@/components/documents/MemoEditor';
@@ -22,50 +23,80 @@ import { authApi } from '@/api/auth';
 import { getErrorMessage } from '@/api/client';
 import { QUERY_KEYS } from '@/utils/constants';
 import { cn } from '@/utils/cn';
+import { externalNotesToHtml } from '@/utils/documentDisplay';
+import { formValidationSummary } from '@/utils/formValidationErrors';
 import { NhiaMemoLetterhead } from '@/components/documents/NhiaMemoLetterhead';
 import { useAuthStore } from '@/stores/authStore';
-import type { CreateRecipientInput, DocumentUrgency } from '@/types/document';
+import type {
+  CorrespondenceDirection,
+  CreateRecipientInput,
+  DocumentCreationProfile,
+  DocumentUrgency,
+} from '@/types/document';
 import type { UserRecord } from '@/api/auth';
 
 const recipientTagSchema = z.object({
-  user_id: z.string().uuid(),
-  recipient_type: z.enum(['to', 'cc', 'bcc']),
+  user_id: z.string().uuid('Choose a valid staff member for each recipient'),
+  recipient_type: z.enum(['to', 'cc', 'bcc'], { message: 'Recipient type is required' }),
 });
 
-const documentTypeSchema = z.enum(['internal', 'external']);
-const correspondenceDirectionSchema = z.enum(['incoming', 'outgoing']);
-const fileCategorySchema = z.enum(['secret', 'top_secret', 'important', 'normal']);
-const prioritySchema = z.enum(['normal', 'important', 'urgent', 'critical']);
-const actionSchema = z.enum(['send', 'draft']);
-const deliveryModeSchema = z.enum(['workflow', 'direct_message']);
-const documentSourceSchema = z.enum(['template', 'manual_entry']);
+const enumField = <const T extends readonly [string, ...string[]]>(values: T, label: string) =>
+  z.enum(values, { message: `${label} is required` });
+
+const correspondenceDirectionSchema = enumField(['incoming', 'outgoing'], 'Correspondence');
+const fileCategorySchema = enumField(['secret', 'top_secret', 'important', 'normal'], 'File category');
+const prioritySchema = enumField(['normal', 'important', 'urgent', 'critical'], 'Priority');
+const actionSchema = enumField(['send', 'draft'], 'Action');
+const deliveryModeSchema = enumField(['workflow', 'direct_message'], 'Delivery mode');
+const documentSourceSchema = enumField(['template', 'manual_entry'], 'Document source');
+
+const sharedCreateFields = {
+  delivery_mode: deliveryModeSchema,
+  document_date: z.string().min(1, 'Document date is required'),
+  subject: z.string().min(1, 'Subject is required').max(500),
+  file_category: fileCategorySchema,
+  document_priority: prioritySchema,
+  file_name: z.string().min(1, 'File name is required').max(500),
+  ref_code: z.string().max(120).optional(),
+  action: actionSchema,
+  tagged_recipients: z.array(recipientTagSchema),
+  /** Workflow engine template — only validated when delivery is workflow + submit. */
+  workflow_template_id: z.string().optional(),
+};
+
+/** Internal memos: optional catalogue template or manual HTML body. */
+const internalDocumentSchema = z.object({
+  ...sharedCreateFields,
+  document_type: z.literal('internal'),
+  document_source: documentSourceSchema,
+  document_template_id: z.string().optional(),
+  body_html: z.string().optional(),
+  body_text_external: z.string().optional(),
+  correspondence_direction: correspondenceDirectionSchema.optional(),
+});
+
+/** External correspondence: file upload + cover notes — no catalogue document template. */
+const externalDocumentSchema = z.object({
+  ...sharedCreateFields,
+  document_type: z.literal('external'),
+  document_source: z.literal('manual_entry'),
+  document_template_id: z.string().optional(),
+  body_html: z.string().optional(),
+  body_text_external: z.string().optional(),
+  correspondence_direction: correspondenceDirectionSchema.default('incoming'),
+});
 
 const formSchema = z
-  .object({
-    delivery_mode: deliveryModeSchema,
-    document_source: documentSourceSchema,
-    document_type: documentTypeSchema,
-    document_date: z.string().min(1, 'Document date is required'),
-    document_template_id: z.string().optional(),
-    subject: z.string().min(1, 'Subject is required').max(500),
-    body_html: z.string().optional(),
-    body_text_external: z.string().optional(),
-    file_category: fileCategorySchema,
-    document_priority: prioritySchema,
-    file_name: z.string().min(1, 'File name is required').max(500),
-    ref_code: z.string().max(120).optional(),
-    correspondence_direction: correspondenceDirectionSchema.optional(),
-    action: actionSchema,
-    /** To / CC / BCC tags applied at creation (workflow, direct message, or external). */
-    tagged_recipients: z.array(recipientTagSchema),
-    /** Workflow engine template (GET /workflows/templates); used when delivery is workflow + submit. */
-    workflow_template_id: z.string().optional(),
-  })
+  .discriminatedUnion('document_type', [internalDocumentSchema, externalDocumentSchema])
   .superRefine((data, ctx) => {
-    if (data.delivery_mode === 'workflow' && !data.workflow_template_id?.trim()) {
+    if (
+      data.delivery_mode === 'workflow' &&
+      data.action === 'send' &&
+      !data.workflow_template_id?.trim()
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Select a workflow',
+        message: 'Select a workflow template',
         path: ['workflow_template_id'],
       });
     }
@@ -73,17 +104,10 @@ const formSchema = z
       if (!data.document_template_id?.trim()) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Document template is required',
+          message: 'Document template is required for internal template mode',
           path: ['document_template_id'],
         });
       }
-    }
-    if (data.document_type === 'external' && !data.correspondence_direction) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Select incoming or outgoing correspondence',
-        path: ['correspondence_direction'],
-      });
     }
     if (data.delivery_mode === 'direct_message' && data.action === 'send') {
       const hasTo = (data.tagged_recipients ?? []).some((r) => r.recipient_type === 'to');
@@ -154,6 +178,7 @@ export default function CreateDocumentPage() {
   const authUser = useAuthStore((s) => s.user);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [departmentOverride, setDepartmentOverride] = useState('');
   const receiveDateLabel = useMemo(() => format(new Date(), 'MMMM d, yyyy'), []);
 
   const { data: orgScope } = useQuery({
@@ -230,14 +255,29 @@ export default function CreateDocumentPage() {
 
   const taggedRecipients = form.watch('tagged_recipients') ?? [];
 
+  const profileDepartment = useMemo(
+    () => resolveWorkflowDepartment(profile, orgScope?.departments),
+    [profile, orgScope?.departments]
+  );
+
+  const needsDepartmentPicker = documentType === 'external' && !profileDepartment;
+
   const lastAppliedDocumentTemplateId = useRef<string | null>(null);
   const prevDocumentSource = useRef(documentSource);
 
+  const applyExternalDocumentMode = () => {
+    form.setValue('document_source', 'manual_entry', { shouldValidate: false });
+    form.setValue('document_template_id', '', { shouldValidate: false });
+    form.setValue('body_html', '', { shouldValidate: false });
+    form.setValue('correspondence_direction', 'incoming', { shouldValidate: false });
+    form.clearErrors(['document_template_id', 'body_html', 'document_source']);
+  };
+
   useEffect(() => {
     if (documentType === 'external') {
-      form.setValue('document_source', 'manual_entry');
+      applyExternalDocumentMode();
     }
-  }, [documentType, form]);
+  }, [documentType, form]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (documentSource !== 'manual_entry' || documentType !== 'internal') return;
@@ -280,9 +320,14 @@ export default function CreateDocumentPage() {
     }
   };
 
+  const clearUploadFile = () => {
+    setUploadFile(null);
+    toast.info('Upload removed. You can select another file.');
+  };
+
   const maxUploadBytes = documentType === 'internal' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open: openFilePicker } = useDropzone({
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
@@ -290,6 +335,8 @@ export default function CreateDocumentPage() {
     },
     maxFiles: 1,
     maxSize: maxUploadBytes,
+    noClick: !!uploadFile,
+    noKeyboard: !!uploadFile,
   });
 
   const submitMutation = useMutation({
@@ -300,15 +347,23 @@ export default function CreateDocumentPage() {
       const orgDepts = orgScope?.departments;
 
       const firstToRecipient = (data.tagged_recipients ?? []).find((r) => r.recipient_type === 'to');
-      const department =
-        data.delivery_mode === 'direct_message' && firstToRecipient
-          ? resolveDepartmentFromRecipient(firstToRecipient.user_id, users, orgDepts)
-          : resolveWorkflowDepartment(profile, orgDepts);
+      let department =
+        data.document_type === 'external'
+          ? departmentOverride.trim() || resolveWorkflowDepartment(profile, orgDepts)
+          : data.delivery_mode === 'direct_message' && firstToRecipient
+            ? resolveDepartmentFromRecipient(firstToRecipient.user_id, users, orgDepts)
+            : resolveWorkflowDepartment(profile, orgDepts);
+
+      if (data.document_type === 'external' && !department.trim()) {
+        throw new Error(
+          'Department is required for external documents. Select your department below, or ask an administrator to set the department on your user profile.'
+        );
+      }
 
       const recipients: CreateRecipientInput[] | undefined =
         (data.tagged_recipients ?? []).length > 0 ? data.tagged_recipients : undefined;
 
-      const creationProfile = {
+      const creationProfile: DocumentCreationProfile = {
         delivery_mode: data.delivery_mode,
         input_mode: data.document_source,
         file_classification: data.file_category,
@@ -380,11 +435,13 @@ export default function CreateDocumentPage() {
 
       if (!uploadFile) throw new Error('Please upload a document file');
       const notes = data.body_text_external?.trim();
+      const notesHtml = notes ? externalNotesToHtml(notes) : undefined;
       const title = data.subject.trim() || data.file_name.trim();
       const created = await documentsApi.uploadExternal(uploadFile, title, department, {
         ref_number: ref,
-        correspondence_direction: data.correspondence_direction!,
+        correspondence_direction: (data.correspondence_direction ?? 'incoming') as CorrespondenceDirection,
         urgency,
+        content: notesHtml,
         ...creationProfile,
       });
       const docId = created.document.id;
@@ -393,12 +450,6 @@ export default function CreateDocumentPage() {
         for (const r of recipients) {
           await documentsApi.addRecipient(docId, r);
         }
-      }
-
-      if (notes) {
-        await documentsApi.update(docId, {
-          content: `<p>${notes.replace(/\n/g, '<br/>')}</p>`,
-        });
       }
       await finalizeAfterCreate(docId);
       return docId;
@@ -435,6 +486,41 @@ export default function CreateDocumentPage() {
       (!workflowTemplates?.length || !workflowTemplateId?.trim())) ||
     false;
 
+  const validationAlert = useMemo(() => {
+    if (form.formState.submitCount === 0) return null;
+    const errs = { ...form.formState.errors };
+    if (documentType === 'external') {
+      delete errs.document_template_id;
+      delete errs.body_html;
+    }
+    if (!Object.keys(errs).length) return null;
+    return formValidationSummary(errs as FieldErrors<CreateFormValues>);
+  }, [form.formState.submitCount, form.formState.errors, documentType]);
+
+  const onFormInvalid = (errors: FieldErrors<CreateFormValues>) => {
+    toast.error(formValidationSummary(errors));
+  };
+
+  const attemptSubmit = (nextAction?: CreateFormValues['action']) => {
+    if (nextAction) {
+      form.setValue('action', nextAction, { shouldValidate: false });
+    }
+    if (form.getValues('document_type') === 'external') {
+      form.clearErrors(['document_template_id', 'body_html']);
+      if (!uploadFile) {
+        toast.error('Upload a PDF or Word file in the Document upload section before submitting.');
+        return;
+      }
+      if (needsDepartmentPicker && !departmentOverride.trim()) {
+        toast.error(
+          'Select your department in the Document profile section (required for external upload).'
+        );
+        return;
+      }
+    }
+    void form.handleSubmit((d) => submitMutation.mutate(d), onFormInvalid)();
+  };
+
   return (
     <div className="w-full min-w-0 space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate('/documents')} className="-ml-1">
@@ -450,10 +536,18 @@ export default function CreateDocumentPage() {
         onSubmit={(e) => {
           e.preventDefault();
           if (deliveryMode === 'workflow') return;
-          form.handleSubmit((d) => submitMutation.mutate(d))();
+          attemptSubmit();
         }}
         className="space-y-6"
       >
+        {validationAlert ? (
+          <Alert variant="destructive" role="alert">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Could not submit — fix the following</AlertTitle>
+            <AlertDescription className="text-sm">{validationAlert}</AlertDescription>
+          </Alert>
+        ) : null}
+
         <Card className="overflow-hidden border-border/80 shadow-sm">
           <NhiaMemoLetterhead
             documentTypeLabel={letterheadLabel}
@@ -641,6 +735,38 @@ export default function CreateDocumentPage() {
                 >
                   Document profile
                 </h3>
+                {needsDepartmentPicker && (
+                  <div className="space-y-1.5 max-w-md">
+                    <Label>
+                      Your department <span className="text-destructive">*</span>
+                    </Label>
+                    <Select
+                      value={departmentOverride.trim() || undefined}
+                      onValueChange={(v) => setDepartmentOverride(v)}
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          'w-full',
+                          !departmentOverride.trim() ? 'border-destructive/70' : undefined
+                        )}
+                      >
+                        <SelectValue placeholder="Select department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orgScope?.departments?.map((d) => (
+                          <SelectItem key={d.id} value={d.name}>
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Your user profile has no department. External upload requires one for registry
+                      tracking (NHIA/IN|OUT/…).
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="document_date">Document date</Label>
@@ -666,7 +792,15 @@ export default function CreateDocumentPage() {
                 <Label>Type</Label>
                 <Select
                   value={documentType}
-                  onValueChange={(v) => form.setValue('document_type', v as CreateFormValues['document_type'])}
+                  onValueChange={(v) => {
+                    const next = v as CreateFormValues['document_type'];
+                    form.setValue('document_type', next, { shouldValidate: false });
+                    if (next === 'external') {
+                      applyExternalDocumentMode();
+                    } else {
+                      form.clearErrors(['correspondence_direction']);
+                    }
+                  }}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -729,7 +863,7 @@ export default function CreateDocumentPage() {
                       Correspondence <span className="text-destructive">*</span>
                     </Label>
                     <Select
-                      value={form.watch('correspondence_direction') ?? 'incoming'}
+                      value={form.watch('correspondence_direction') || 'incoming'}
                       onValueChange={(v) =>
                         form.setValue('correspondence_direction', v as 'incoming' | 'outgoing', {
                           shouldValidate: true,
@@ -742,7 +876,7 @@ export default function CreateDocumentPage() {
                           form.formState.errors.correspondence_direction ? 'border-destructive' : undefined
                         )}
                       >
-                        <SelectValue placeholder="Incoming or outgoing" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="incoming">Incoming</SelectItem>
@@ -899,24 +1033,61 @@ export default function CreateDocumentPage() {
 
             <div className="space-y-2">
               <Label>Document upload</Label>
-              <div
-                {...getRootProps()}
-                className={cn(
-                  'border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors',
-                  isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
-                )}
-              >
-                <input {...getInputProps()} />
-                <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm font-medium">Drop a file here or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  PDF or DOCX · max {documentType === 'internal' ? '5' : '10'} MB
-                  {documentType === 'internal' ? ' (optional attachment)' : ''}
-                </p>
-                {uploadFile && (
-                  <p className="text-sm text-primary mt-3 font-medium">{uploadFile.name}</p>
-                )}
-              </div>
+              <input {...getInputProps()} className="sr-only" />
+              {uploadFile ? (
+                <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-background"
+                      aria-hidden
+                    >
+                      <FileText className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate" title={uploadFile.name}>
+                        {uploadFile.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {uploadFile.size >= 1024 * 1024
+                          ? `${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB`
+                          : `${(uploadFile.size / 1024).toFixed(1)} KB`}
+                        {' · '}
+                        PDF or DOCX
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Button type="button" variant="outline" size="sm" onClick={() => openFilePicker()}>
+                      Replace file
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={clearUploadFile}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  {...getRootProps()}
+                  className={cn(
+                    'border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors',
+                    isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+                  )}
+                >
+                  <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm font-medium">Drop a file here or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    PDF or DOCX · max {documentType === 'internal' ? '5' : '10'} MB
+                    {documentType === 'internal' ? ' (optional attachment)' : ''}
+                  </p>
+                </div>
+              )}
               {documentType === 'external' && !uploadFile && (
                 <p className="text-xs text-muted-foreground">External documents require an uploaded file.</p>
               )}
@@ -995,10 +1166,7 @@ export default function CreateDocumentPage() {
                         variant="outline"
                         loading={submitMutation.isPending}
                         disabled={submitDisabled}
-                        onClick={() => {
-                          form.setValue('action', 'draft');
-                          void form.handleSubmit((d) => submitMutation.mutate(d))();
-                        }}
+                        onClick={() => attemptSubmit('draft')}
                       >
                         Save as draft
                       </Button>
@@ -1006,10 +1174,7 @@ export default function CreateDocumentPage() {
                         type="button"
                         loading={submitMutation.isPending}
                         disabled={submitDisabled}
-                        onClick={() => {
-                          form.setValue('action', 'send');
-                          void form.handleSubmit((d) => submitMutation.mutate(d))();
-                        }}
+                        onClick={() => attemptSubmit('send')}
                       >
                         Submit to workflow
                       </Button>
