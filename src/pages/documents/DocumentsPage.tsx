@@ -490,7 +490,7 @@ export default function DocumentsPage() {
                     Urgency
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[220px] min-w-[220px]">
-                    Owner
+                    Created by
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[130px] min-w-[130px]">
                     Updated
@@ -592,7 +592,7 @@ export default function DocumentsPage() {
                     Urgency
                   </th> */}
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[220px] min-w-[220px]">
-                    Owner
+                    Created by
                   </th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-[130px] min-w-[130px]">
                     Updated

@@ -1007,7 +1007,7 @@ export function OperationalReportingHubPanel() {
             ) : null}
             {hub.registry_documents ? (
               <TabsTrigger value="registry" className="shrink-0 px-2.5 text-xs">
-                Reports
+                Management reports
               </TabsTrigger>
             ) : null}
             {hub.reporting_compliance ? (
