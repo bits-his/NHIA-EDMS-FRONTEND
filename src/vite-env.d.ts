@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+declare module 'mammoth/mammoth.browser' {
+  export function convertToHtml(input: { arrayBuffer: ArrayBuffer }): Promise<{ value: string }>;
+}
+
 interface ImportMetaEnv {
   readonly VITE_ORCHESTRATOR_URL: string;
   readonly VITE_AUTH_URL: string;

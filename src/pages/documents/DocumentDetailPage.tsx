@@ -15,6 +15,7 @@ import {
   Download,
   Trash2,
   GitBranch,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,7 @@ import { DocumentActivitySidebar } from '@/components/documents/DocumentActivity
 import { DocumentCommentsSection } from '@/components/documents/DocumentCommentsSection';
 import { DocumentDiscussionsPanel } from '@/components/documents/DocumentDiscussionsPanel';
 import { ExternalPrimaryFileViewer } from '@/components/documents/ExternalPrimaryFileViewer';
+import { SupportingAttachmentPreviewDialog } from '@/components/documents/SupportingAttachmentPreviewDialog';
 import { WorkflowBpmnPanel } from '@/components/documents/WorkflowBpmnPanel';
 import { documentsApi } from '@/api/documents';
 import { authApi, type UserRecord } from '@/api/auth';
@@ -56,6 +58,7 @@ import { QUERY_KEYS } from '@/utils/constants';
 import { formatDateTime, formatRelative, isDocumentAssignmentOverdue } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { getErrorMessage } from '@/api/client';
+import type { DocumentAttachment } from '@/types/document';
 import { isUuid } from '@/utils/uuid';
 import { hasActiveTaskOnCurrentWorkflowStep } from '@/utils/hasActiveTaskOnCurrentWorkflowStep';
 import { wasReturnedForMoreInfo } from '@/utils/wasReturnedForMoreInfo';
@@ -191,6 +194,7 @@ export default function DocumentDetailPage() {
     id: string;
     filename: string;
   } | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<DocumentAttachment | null>(null);
 
   const documentIdValid = !!id && isUuid(id);
 
@@ -552,9 +556,15 @@ export default function DocumentDetailPage() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => documentsApi.uploadAttachment(id!, file),
-    onSuccess: () => {
-      toast.success('Attachment uploaded');
+    mutationFn: async (files: File[]) => {
+      for (const file of files) {
+        await documentsApi.uploadAttachment(id!, file);
+      }
+    },
+    onSuccess: (_data, files) => {
+      toast.success(
+        files.length === 1 ? 'Supporting document uploaded' : `${files.length} supporting documents uploaded`
+      );
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.documentAttachments(id!) });
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
@@ -705,8 +715,8 @@ export default function DocumentDetailPage() {
           <AlertDescription className="text-sm text-amber-950 dark:text-amber-100">
             {doc?.delivery_mode === 'direct_message' ? (
               <>
-                This direct message was returned to you for more information. Use <strong>Edit</strong> to
-                update the memo, then <strong>Approve and send</strong> when you are ready to pass it back.
+                This direct message was returned or reversed to you. Use <strong>Edit</strong> to
+                update the memo, then send it forward again when you are ready.
               </>
             ) : (
               <>
@@ -737,12 +747,13 @@ export default function DocumentDetailPage() {
                 {/* Sender & recipients */}
                 <section className="px-4 py-5 sm:px-6" aria-labelledby="section-recipients">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3
+                    {/* <h3
                       id="section-recipients"
                       className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                     >
                       Sender &amp; recipients
-                    </h3>
+                    </h3> */}
+                    <h3></h3>
                     {canAddRecipient && (
                       <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setRecipientOpen(true)}>
                         Add recipient
@@ -822,13 +833,15 @@ export default function DocumentDetailPage() {
 
                 {/* Body */}
                 <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-body">
-                  <h3
-                    id="section-body"
-                    className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    {doc.category === 'external_correspondence' ? 'Body / notes' : 'Body'}
-                  </h3>
+                  {!doc.file_path && (
+                    <h3
+                      id="section-body"
+                      className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      {doc.category === 'external_correspondence' ? 'Body / notes' : 'Body'}
+                    </h3>
+                  )}
                   {doc.category === 'external_correspondence' ? (
                     <>
                       {hasBodyText ? (
@@ -847,9 +860,6 @@ export default function DocumentDetailPage() {
                       )}
                       {doc.file_path ? (
                         <div className="space-y-2 pt-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            Uploaded file
-                          </p>
                           <ExternalPrimaryFileViewer
                             documentId={doc.id}
                             filename={
@@ -874,9 +884,21 @@ export default function DocumentDetailPage() {
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic py-2">
-                      No body text was entered. Edit the document to add memo content.
+                      No cover notes were entered for this document.
                     </p>
                   )}
+                  {doc.file_path ? (
+                    <div className="space-y-2 pt-2">
+                      <ExternalPrimaryFileViewer
+                        documentId={doc.id}
+                        filename={
+                          doc.original_filename?.trim() ||
+                          doc.intake_file_name?.trim() ||
+                          'Uploaded document'
+                        }
+                      />
+                    </div>
+                  ) : null}
                 </section>
 
                 {/* Attachments */}
@@ -893,10 +915,11 @@ export default function DocumentDetailPage() {
                         <input
                           ref={fileInputRef}
                           type="file"
+                          multiple
                           className="hidden"
                           onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) uploadMutation.mutate(f);
+                            const files = Array.from(e.target.files ?? []);
+                            if (files.length) uploadMutation.mutate(files);
                           }}
                         />
                         <Button
@@ -924,6 +947,14 @@ export default function DocumentDetailPage() {
                             {a.filename}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`View ${a.filename}`}
+                              onClick={() => setPreviewAttachment(a)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1207,6 +1238,15 @@ export default function DocumentDetailPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <SupportingAttachmentPreviewDialog
+        documentId={doc.id}
+        attachment={previewAttachment}
+        open={!!previewAttachment}
+        onOpenChange={(open) => {
+          if (!open) setPreviewAttachment(null);
+        }}
+      />
 
       <ConfirmDialog
         open={!!attachmentToDelete}

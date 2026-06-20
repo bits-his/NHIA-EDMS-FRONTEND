@@ -149,6 +149,14 @@ export const documentsApi = {
     return res.data;
   },
 
+  /** Upload or replace the primary document file (PDF/DOCX). Owner only while draft/pending. */
+  uploadPrimaryFile: async (documentId: string, file: File): Promise<Document> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await documentClient.post<Document>(`/documents/${documentId}/primary-file`, form);
+    return res.data;
+  },
+
   /** Save e-signature image for the signed-in user (PNG/JPEG/WebP/GIF, max ~1 MB). */
   uploadProfileSignature: async (file: File): Promise<{ signature_path: string | null; message: string }> => {
     const form = new FormData();
@@ -237,10 +245,15 @@ export const documentsApi = {
     return res.data;
   },
 
-  /** Workflow final step: pending → archived (organisation registry) + audit row. Does not append e-signature. */
-  finalApprove: async (id: string, comment?: string): Promise<Document> => {
+  /** Workflow final step: pending → archived (organisation registry) + audit row. Signature append is optional. */
+  finalApprove: async (
+    id: string,
+    comment?: string,
+    options?: { appendSignature?: boolean }
+  ): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/final-approve`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
+      ...(options?.appendSignature ? { append_signature: true } : {}),
     });
     return res.data;
   },
@@ -254,21 +267,29 @@ export const documentsApi = {
     id: string,
     comment?: string,
     actionType?: string,
-    nextUserId?: string
+    nextUserId?: string,
+    options?: { appendSignature?: boolean }
   ): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/edit-forward`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
       ...(actionType !== undefined && actionType !== '' ? { action_type: actionType } : {}),
       ...(nextUserId !== undefined && nextUserId !== '' ? { next_user_id: nextUserId } : {}),
+      ...(options?.appendSignature ? { append_signature: true } : {}),
     });
     return res.data;
   },
 
-  /** Workflow approve-forward step: appends user e-signature stamp to document body on the server. */
-  approveForward: async (id: string, comment?: string, nextUserId?: string): Promise<Document> => {
+  /** Workflow approve-forward step. E-signature stamp is optional (`appendSignature`). */
+  approveForward: async (
+    id: string,
+    comment?: string,
+    nextUserId?: string,
+    options?: { appendSignature?: boolean }
+  ): Promise<Document> => {
     const res = await documentClient.post<Document>(`/documents/${id}/approve-forward`, {
       ...(comment !== undefined && comment !== '' ? { comment } : {}),
       ...(nextUserId?.trim() ? { next_user_id: nextUserId.trim() } : {}),
+      ...(options?.appendSignature ? { append_signature: true } : {}),
     });
     return res.data;
   },

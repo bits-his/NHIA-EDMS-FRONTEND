@@ -277,7 +277,7 @@ export default function DocumentsPage() {
   const recallMutation = useMutation({
     mutationFn: (id: string) => documentsApi.recall(id),
     onSuccess: () => {
-      toast.success('Document recalled to draft.');
+      toast.success('Document recalled to draft. Routing and workflow were cleared.');
       setRecallDoc(null);
       invalidateDocuments();
     },
@@ -799,7 +799,7 @@ export default function DocumentsPage() {
           if (!open) setRecallDoc(null);
         }}
         title="Recall this document?"
-        description="This moves the document back to draft and pauses the active workflow (if any). Only you can do this because you created it."
+        description="This moves the document back to draft, cancels the active workflow, and clears all recipients so you can edit and submit again from scratch. Only you can do this because you created it."
         confirmLabel="Recall"
         variant="destructive"
         loading={recallMutation.isPending}

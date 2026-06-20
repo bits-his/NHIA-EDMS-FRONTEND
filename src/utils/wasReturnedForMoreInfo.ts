@@ -15,9 +15,12 @@ const FORWARD_PROGRESS_AFTER_RETURN = new Set([
   'review_send',
 ]);
 
+/** Actions that mean someone sent the document back to the prior holder. */
+const RETURN_TO_SENDER_ACTIONS = new Set(['request_info', 'reverse']);
+
 /**
- * True only when this user was sent back after someone requested more information:
- * a recent `request_info` by another actor, and no forward progress since then.
+ * True when this user was sent back after someone requested more information or reversed the baton:
+ * a recent return action by another actor, and no forward progress since then.
  */
 export function wasReturnedForMoreInfo(params: {
   workflowActions: DocumentWorkflowAction[] | undefined;
@@ -38,21 +41,21 @@ export function wasReturnedForMoreInfo(params: {
   } = params;
   if (!documentId || !currentUserId) return false;
 
-  const latestRequestInfo = [...(workflowActions ?? [])]
-    .filter((a) => a.action === 'request_info')
+  const latestReturnToSender = [...(workflowActions ?? [])]
+    .filter((a) => RETURN_TO_SENDER_ACTIONS.has(a.action))
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-  if (!latestRequestInfo) return false;
-  if (latestRequestInfo.actor_id === currentUserId) return false;
+  if (!latestReturnToSender) return false;
+  if (latestReturnToSender.actor_id === currentUserId) return false;
 
-  const requestAt = new Date(latestRequestInfo.created_at).getTime();
-  if (!Number.isFinite(requestAt)) return false;
+  const returnAt = new Date(latestReturnToSender.created_at).getTime();
+  if (!Number.isFinite(returnAt)) return false;
 
-  const progressedAfterRequest = (workflowActions ?? []).some(
+  const progressedAfterReturn = (workflowActions ?? []).some(
     (a) =>
-      new Date(a.created_at).getTime() > requestAt &&
+      new Date(a.created_at).getTime() > returnAt &&
       FORWARD_PROGRESS_AFTER_RETURN.has(String(a.action))
   );
-  if (progressedAfterRequest) return false;
+  if (progressedAfterReturn) return false;
 
   if (isDirectMessageRecipient) {
     return true;
@@ -74,5 +77,5 @@ export function wasReturnedForMoreInfo(params: {
   const taskAt = new Date(myCurrentTask.created_at).getTime();
   if (!Number.isFinite(taskAt)) return false;
 
-  return taskAt >= requestAt - 2000;
+  return taskAt >= returnAt - 2000;
 }

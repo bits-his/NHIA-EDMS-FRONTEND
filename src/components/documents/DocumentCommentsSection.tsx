@@ -17,9 +17,10 @@ import { formatDateTime, formatRelative } from '@/utils/formatters';
 import { resolveUsername } from '@/utils/users';
 import { normalizeWorkflowStepActionType } from '@/utils/permissions';
 import {
-  directMessageActionRequiresSignature,
+  directMessageActionSupportsSignature,
   ESIGNATURE_SETUP_MESSAGE,
   userHasEsignatureOnFile,
+  workflowActionSupportsSignature,
 } from '@/utils/eSignature';
 import {
   buildRankFilterOptions,
@@ -33,6 +34,7 @@ const ACTION_LABELS: Record<string, string> = {
   edit_forward: 'Note',
   approve_forward: 'Approved & forwarded',
   request_info: 'Requested more info',
+  reverse: 'Reversed to sender',
   final_approve: 'Final approval',
   final_approval: 'Final approval',
   attach_send: 'Attached & sent',
@@ -54,6 +56,8 @@ const ACTION_TONE: Record<string, string> = {
   reject: 'bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-900/20 dark:text-red-400 dark:ring-red-800',
   request_info:
     'bg-amber-50 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:ring-amber-800',
+  reverse:
+    'bg-orange-50 text-orange-800 ring-1 ring-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:ring-orange-800',
   approve_forward:
     'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:ring-emerald-800',
   final_approve:
@@ -83,18 +87,21 @@ type DmForwardActionType =
   | 'review_send'
   | 'approve_send'
   | 'request_info'
+  | 'reverse'
   | 'final_approval';
 
 const FORWARD_ACTION_OPTIONS: { value: DmForwardActionType; label: string }[] = [
   { value: 'attach_send', label: 'Attach and send' },
   { value: 'review_send', label: 'Review and send' },
   { value: 'approve_send', label: 'Approve and send' },
+  { value: 'reverse', label: 'Reverse to sender' },
   { value: 'request_info', label: 'Request more information' },
   { value: 'final_approval', label: 'Final approval (archive & close)' },
 ];
 
 const DM_TERMINAL_ACTIONS: ReadonlySet<DmForwardActionType> = new Set(['final_approval']);
 const DM_REQUEST_INFO_ACTIONS: ReadonlySet<DmForwardActionType> = new Set(['request_info']);
+const DM_REVERSE_ACTIONS: ReadonlySet<DmForwardActionType> = new Set(['reverse']);
 
 function actorDisplay(a: DocumentWorkflowAction): string {
   return a.actor_full_name?.trim() || a.actor_username?.trim() || resolveUsername(a.actor_id);
@@ -144,14 +151,17 @@ function CommentApproverSignature({
       className="mt-2 rounded-md border border-violet-200/80 bg-violet-50/50 dark:border-violet-800/50 dark:bg-violet-950/20 p-2.5"
       aria-label={`E-signature of ${actorDisplay(action)}`}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800/80 dark:text-violet-300/80 mb-1.5">
-        Approver signature
-      </p>
       <img
         src={objectUrl}
         alt=""
         className="max-h-[72px] max-w-[260px] object-contain object-left"
       />
+      <p
+        className="mt-1.5 text-[11px] text-muted-foreground tabular-nums"
+        title={formatDateTime(action.created_at)}
+      >
+        {formatDateTime(action.created_at)}
+      </p>
     </div>
   );
 }
@@ -205,32 +215,40 @@ export function DocumentCommentsSection({
   const [nextUserRank, setNextUserRank] = useState('');
   const [nextUserId, setNextUserId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [appendSignature, setAppendSignature] = useState(false);
 
   const isTerminalAction =
     isDirectMessage && actionType !== '' && DM_TERMINAL_ACTIONS.has(actionType);
   const isRequestInfoAction =
     isDirectMessage && actionType !== '' && DM_REQUEST_INFO_ACTIONS.has(actionType);
+  const isReverseAction =
+    isDirectMessage && actionType !== '' && DM_REVERSE_ACTIONS.has(actionType);
   const isForward =
     isDirectMessage &&
     actionType !== '' &&
     !isTerminalAction &&
-    !isRequestInfoAction;
+    !isRequestInfoAction &&
+    !isReverseAction;
   const normalizedWorkflowAction = normalizeWorkflowStepActionType(workflowStepActionType);
   const canSubmitWorkflowAction =
     isWorkflow && !!workflowInstanceId && canAdvanceWorkflow && !isDirectMessage;
   const workflowSubmitLabel =
     normalizedWorkflowAction === 'final_approve'
-      ? 'Comment & final approve'
+      ? appendSignature
+        ? 'Comment, sign & final approve'
+        : 'Comment & final approve'
       : normalizedWorkflowAction === 'approve' || normalizedWorkflowAction === 'approve_forward'
-        ? 'Comment & approve'
+        ? appendSignature
+          ? 'Comment, sign & approve'
+          : 'Comment & approve'
         : normalizedWorkflowAction === 'review'
           ? 'Comment & forward'
           : 'Comment & workflow action';
   const workflowComposerTitle =
     normalizedWorkflowAction === 'final_approve'
-      ? 'Your comment will be saved. Final approval archives this process (read-only) and closes the chain.'
+      ? 'Final approval archives this process (read-only) and closes the chain. Optionally append your e-signature before completing.'
       : normalizedWorkflowAction === 'approve' || normalizedWorkflowAction === 'approve_forward'
-        ? 'Your comment will be saved and this workflow step will be approved.'
+        ? 'Your comment will be saved and this workflow step will be approved. You may send with or without appending your e-signature.'
         : normalizedWorkflowAction === 'review'
           ? 'Your comment will be saved and the workflow will move to the next step.'
           : 'Your comment will be saved and the current workflow step will be completed.';
@@ -274,13 +292,18 @@ export function DocumentCommentsSection({
   const { data: myProfile, isLoading: myProfileLoading } = useQuery({
     queryKey: QUERY_KEYS.userProfile(ownUserId ?? ''),
     queryFn: () => authApi.getProfile(ownUserId!),
-    enabled: canComment && isDirectMessage && !!ownUserId,
+    enabled: canComment && !!ownUserId,
   });
 
   const hasEsignature = userHasEsignatureOnFile(myProfile);
-  const dmNeedsSignature =
-    isDirectMessage && directMessageActionRequiresSignature(actionType);
-  const dmSignatureBlocked = dmNeedsSignature && (myProfileLoading || !hasEsignature);
+  const showWorkflowSignatureOption =
+    canSubmitWorkflowAction && workflowActionSupportsSignature(normalizedWorkflowAction);
+  const showDmSignatureOption =
+    isDirectMessage &&
+    actionType !== '' &&
+    directMessageActionSupportsSignature(actionType);
+  const signatureAppendBlocked =
+    appendSignature && (myProfileLoading || !hasEsignature);
 
   /**
    * Only exclude the current user (you can't forward to yourself). Previous
@@ -323,6 +346,7 @@ export function DocumentCommentsSection({
     setNextUserRank('');
     setNextUserId('');
     setSelectedFile(null);
+    setAppendSignature(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -332,18 +356,20 @@ export function DocumentCommentsSection({
       actionType: DmForwardActionType | '';
       nextUserId: string;
       file: File | null;
+      appendSignature: boolean;
     }) => {
       if (input.file) {
         await documentsApi.uploadAttachment(documentId, input.file);
       }
       if (canSubmitWorkflowAction) {
         const note = input.text || undefined;
+        const sigOpts = { appendSignature: input.appendSignature };
         if (normalizedWorkflowAction === 'final_approve') {
-          await documentsApi.finalApprove(documentId, note);
+          await documentsApi.finalApprove(documentId, note, sigOpts);
           return workflowApi.advance(workflowInstanceId, undefined);
         }
         if (normalizedWorkflowAction === 'approve' || normalizedWorkflowAction === 'approve_forward') {
-          await documentsApi.approveForward(documentId, note);
+          await documentsApi.approveForward(documentId, note, undefined, sigOpts);
           return workflowApi.advance(workflowInstanceId, undefined);
         }
         await documentsApi.editForward(documentId, note);
@@ -354,7 +380,10 @@ export function DocumentCommentsSection({
         if (!note) throw new Error('Explain what information is needed.');
         return documentsApi.requestInfo(documentId, note);
       }
-      if (directMessageActionRequiresSignature(input.actionType) && !userHasEsignatureOnFile(myProfile)) {
+      if (input.actionType === 'reverse') {
+        return documentsApi.editForward(documentId, input.text || undefined, 'reverse');
+      }
+      if (input.appendSignature && !userHasEsignatureOnFile(myProfile)) {
         throw new Error(ESIGNATURE_SETUP_MESSAGE);
       }
       const dmForward =
@@ -365,7 +394,8 @@ export function DocumentCommentsSection({
         documentId,
         input.text || undefined,
         input.actionType || undefined,
-        dmForward ? input.nextUserId : undefined
+        dmForward ? input.nextUserId : undefined,
+        { appendSignature: input.appendSignature }
       );
     },
     onSuccess: (_data, variables) => {
@@ -375,7 +405,9 @@ export function DocumentCommentsSection({
           ? 'Comment saved and workflow advanced'
           : dmAction === 'request_info'
             ? 'Returned to the sender for more information'
-            : dmAction === 'final_approval'
+            : dmAction === 'reverse'
+              ? 'Document reversed to the person who sent it to you'
+              : dmAction === 'final_approval'
               ? 'Final approval recorded — process archived and is now read-only'
               : dmAction === 'approve_send' ||
                   dmAction === 'attach_send' ||
@@ -409,11 +441,12 @@ export function DocumentCommentsSection({
   const dmForwardReady =
     !isDirectMessage || !isForward || nextUserId.trim().length > 0;
   const dmSubstanceOrForwardOk =
-    !isDirectMessage || isTerminalAction || hasSubstance || isForward;
+    !isDirectMessage || isTerminalAction || isReverseAction || hasSubstance || isForward;
 
   const allowSubmitContent = (() => {
     if (isDirectMessage) {
       if (isRequestInfoAction) return trimmed.length > 0;
+      if (isReverseAction) return dmActionChosen;
       return (
         dmActionChosen &&
         dmForwardReady &&
@@ -428,7 +461,45 @@ export function DocumentCommentsSection({
   })();
 
   const canPost =
-    canComment && allowSubmitContent && !submitMutation.isPending && !dmSignatureBlocked;
+    canComment && allowSubmitContent && !submitMutation.isPending && !signatureAppendBlocked;
+
+  const signatureOptionBlock = (showWorkflowSignatureOption || showDmSignatureOption) && (
+    <div className="space-y-2">
+      <label className="flex items-start gap-2.5 rounded-md border border-border/70 bg-background px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 rounded border-border"
+          checked={appendSignature}
+          onChange={(e) => setAppendSignature(e.target.checked)}
+          disabled={submitMutation.isPending}
+        />
+        <span className="text-sm leading-snug">
+          <span className="font-medium text-foreground">Append my e-signature</span>
+          <span className="block text-xs text-muted-foreground mt-0.5">
+            When checked, your saved signature from Settings is stamped on the memo before sending.
+          </span>
+        </span>
+      </label>
+      {signatureAppendBlocked && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 flex gap-2"
+          role="alert"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+          <div className="text-xs text-destructive space-y-1">
+            <p className="font-medium">E-signature required to append</p>
+            <p>{ESIGNATURE_SETUP_MESSAGE}</p>
+            <Link
+              to="/settings"
+              className="inline-block font-medium underline underline-offset-2 hover:opacity-90"
+            >
+              Open Settings → E-signature
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-comments">
@@ -445,9 +516,12 @@ export function DocumentCommentsSection({
       {canComment && (
         <div className="rounded-lg border border-border/70 bg-muted/20 p-3 space-y-3">
           {canSubmitWorkflowAction && (
-            <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
-              <p className="text-xs font-medium text-primary">{workflowSubmitLabel}</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">{workflowComposerTitle}</p>
+            <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 space-y-3">
+              <div>
+                <p className="text-xs font-medium text-primary">{workflowSubmitLabel}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">{workflowComposerTitle}</p>
+              </div>
+              {signatureOptionBlock}
             </div>
           )}
 
@@ -461,7 +535,8 @@ export function DocumentCommentsSection({
                   value={actionType || undefined}
                   onValueChange={(v) => {
                     setActionType(v as DmForwardActionType);
-                    if (v === 'request_info') {
+                    setAppendSignature(false);
+                    if (v === 'request_info' || v === 'reverse') {
                       setNextUserRank('');
                       setNextUserId('');
                     }
@@ -490,34 +565,26 @@ export function DocumentCommentsSection({
                 </div>
               )}
 
-              {dmSignatureBlocked && (
-                <div
-                  className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 flex gap-2"
-                  role="alert"
-                >
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
-                  <div className="text-xs text-destructive space-y-1">
-                    <p className="font-medium">E-signature required</p>
-                    <p>{ESIGNATURE_SETUP_MESSAGE}</p>
-                    <Link
-                      to="/settings"
-                      className="inline-block font-medium underline underline-offset-2 hover:opacity-90"
-                    >
-                      Open Settings → E-signature
-                    </Link>
-                  </div>
+              {isReverseAction && (
+                <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/50 dark:bg-sky-950/30">
+                  <p className="text-xs text-sky-950 dark:text-sky-100">
+                    The document is returned to whoever sent it to you. They can review, edit, and
+                    forward it again.
+                  </p>
                 </div>
               )}
 
-              {isTerminalAction && !dmSignatureBlocked && (
+              {signatureOptionBlock}
+
+              {isTerminalAction && (
                 <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 dark:border-violet-800/60 dark:bg-violet-900/20">
                   <p className="text-xs font-medium text-violet-800 dark:text-violet-300">
                     Final approval closes this chain
                   </p>
                   <p className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-300/80">
                     The process will become <span className="font-medium">read-only and archived</span>,
-                    your e-signature from Settings will be appended to the memo, and no further
-                    recipients can act on it.
+                    and no further recipients can act on it. Optionally check the box above to append
+                    your e-signature.
                   </p>
                 </div>
               )}
@@ -591,9 +658,6 @@ export function DocumentCommentsSection({
                         No users with this rank in the directory.
                       </p>
                     )}
-                    <p className="text-[11px] text-muted-foreground">
-                      Approve and send appends your e-signature (Settings → E-signature) before forwarding.
-                    </p>
                   </div>
                 </div>
               )}
@@ -602,8 +666,8 @@ export function DocumentCommentsSection({
 
           <Textarea
             placeholder={
-              isTerminalAction
-                ? 'Add a closing note (optional)…'
+              isTerminalAction || isReverseAction
+                ? 'Add a note (optional)…'
                 : isRequestInfoAction
                   ? 'What information is needed…'
                 : isForward
@@ -665,7 +729,7 @@ export function DocumentCommentsSection({
               disabled={!canPost}
               loading={submitMutation.isPending}
               onClick={() => {
-                if (dmSignatureBlocked) {
+                if (signatureAppendBlocked) {
                   toast.error(ESIGNATURE_SETUP_MESSAGE);
                   return;
                 }
@@ -675,6 +739,7 @@ export function DocumentCommentsSection({
                   actionType,
                   nextUserId,
                   file: selectedFile,
+                  appendSignature,
                 });
               }}
             >
@@ -685,7 +750,9 @@ export function DocumentCommentsSection({
                   ? 'Select action type'
                   : isRequestInfoAction
                     ? 'Request info'
-                    : isTerminalAction
+                    : isReverseAction
+                      ? 'Reverse'
+                      : isTerminalAction
                       ? 'Final approve'
                       : isForward
                         ? 'Send'
@@ -699,9 +766,9 @@ export function DocumentCommentsSection({
           {isRequestInfoAction && !trimmed && (
             <p className="text-xs text-destructive">A comment is required for request more information.</p>
           )}
-          {dmSignatureBlocked && (
+          {signatureAppendBlocked && (
             <p className="text-xs text-destructive">
-              Set up your e-signature in Settings before you can complete this action.
+              Set up your e-signature in Settings to append it, or uncheck the signature option to send without it.
             </p>
           )}
           {isForward && nextUserId === '' && (

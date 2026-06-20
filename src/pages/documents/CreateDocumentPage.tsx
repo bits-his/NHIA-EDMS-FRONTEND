@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { AlertCircle, ArrowLeft, FileText, Upload, User, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, FileText, Paperclip, Upload, User, X } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -177,7 +177,8 @@ export default function CreateDocumentPage() {
   const preDocumentTemplateId = searchParams.get('document_template_id') ?? undefined;
   const authUser = useAuthStore((s) => s.user);
 
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [primaryFile, setPrimaryFile] = useState<File | null>(null);
+  const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
   const [departmentOverride, setDepartmentOverride] = useState('');
   const receiveDateLabel = useMemo(() => format(new Date(), 'MMMM d, yyyy'), []);
 
@@ -309,34 +310,82 @@ export default function CreateDocumentPage() {
     form.setValue('body_html', tpl.body_template ?? '');
   }, [documentType, documentSource, documentTemplateId, documentTemplates]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onDrop = (accepted: File[]) => {
+  const onPrimaryDrop = (accepted: File[]) => {
     if (accepted[0]) {
-      setUploadFile(accepted[0]);
+      setPrimaryFile(accepted[0]);
       const base = accepted[0].name.replace(/\.[^/.]+$/, '');
       if (!form.getValues('file_name')?.trim()) {
         form.setValue('file_name', base, { shouldValidate: true });
       }
-      toast.success(`Selected ${accepted[0].name}`);
+      toast.success(`Main document: ${accepted[0].name}`);
     }
   };
 
-  const clearUploadFile = () => {
-    setUploadFile(null);
-    toast.info('Upload removed. You can select another file.');
+  const onSupportingDrop = (accepted: File[]) => {
+    if (!accepted.length) return;
+    setSupportingFiles((prev) => {
+      const names = new Set(prev.map((f) => `${f.name}-${f.size}`));
+      const next = [...prev];
+      for (const file of accepted) {
+        const key = `${file.name}-${file.size}`;
+        if (!names.has(key)) {
+          next.push(file);
+          names.add(key);
+        }
+      }
+      return next;
+    });
+    toast.success(
+      accepted.length === 1
+        ? `Supporting document: ${accepted[0].name}`
+        : `${accepted.length} supporting documents added`
+    );
   };
 
-  const maxUploadBytes = documentType === 'internal' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+  const clearPrimaryFile = () => {
+    setPrimaryFile(null);
+    toast.info('Main document removed.');
+  };
 
-  const { getRootProps, getInputProps, isDragActive, open: openFilePicker } = useDropzone({
-    onDrop,
+  const removeSupportingFile = (index: number) => {
+    setSupportingFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const maxPrimaryBytes = 10 * 1024 * 1024;
+  const maxSupportingBytes = 5 * 1024 * 1024;
+
+  const uploadAllSupporting = async (docId: string, files: File[]) => {
+    for (const file of files) {
+      await documentsApi.uploadAttachment(docId, file);
+    }
+  };
+
+  const {
+    getRootProps: getPrimaryRootProps,
+    getInputProps: getPrimaryInputProps,
+    isDragActive: isPrimaryDragActive,
+    open: openPrimaryPicker,
+  } = useDropzone({
+    onDrop: onPrimaryDrop,
     accept: {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     },
     maxFiles: 1,
-    maxSize: maxUploadBytes,
-    noClick: !!uploadFile,
-    noKeyboard: !!uploadFile,
+    maxSize: maxPrimaryBytes,
+    noClick: !!primaryFile,
+    noKeyboard: !!primaryFile,
+  });
+
+  const {
+    getRootProps: getSupportingRootProps,
+    getInputProps: getSupportingInputProps,
+    isDragActive: isSupportingDragActive,
+    open: openSupportingPicker,
+  } = useDropzone({
+    onDrop: onSupportingDrop,
+    maxSize: maxSupportingBytes,
+    multiple: true,
   });
 
   const submitMutation = useMutation({
@@ -389,8 +438,20 @@ export default function CreateDocumentPage() {
       };
 
       if (data.document_type === 'internal') {
+        if (data.document_source === 'manual_entry' && !primaryFile) {
+          throw new Error('Upload the main document file for manual entry.');
+        }
+
+        const manualNotes =
+          data.document_source === 'manual_entry' ? data.body_text_external?.trim() : '';
+        const innerBody =
+          data.document_source === 'manual_entry'
+            ? manualNotes
+              ? externalNotesToHtml(manualNotes)
+              : '<p></p>'
+            : (data.body_html ?? '').trim() || '<p></p>';
+
         if (data.document_source === 'manual_entry') {
-          const innerBody = (data.body_html ?? '').trim() || '<p></p>';
           const created = await documentsApi.create({
             title: data.subject.trim(),
             content: innerBody,
@@ -402,17 +463,16 @@ export default function CreateDocumentPage() {
             ...creationProfile,
           });
           const docId = created.document.id;
-          if (uploadFile) {
-            await documentsApi.uploadAttachment(docId, uploadFile);
+          if (primaryFile) {
+            await documentsApi.uploadPrimaryFile(docId, primaryFile);
           }
+          await uploadAllSupporting(docId, supportingFiles);
           await finalizeAfterCreate(docId);
           return docId;
         }
 
         const tplId = data.document_template_id?.trim();
         if (!tplId) throw new Error('Select a document template.');
-        const innerBody = (data.body_html ?? '').trim() || '<p></p>';
-
         const created = await documentsApi.create({
           title: data.subject.trim(),
           content: innerBody,
@@ -426,18 +486,19 @@ export default function CreateDocumentPage() {
         });
 
         const docId = created.document.id;
-        if (uploadFile) {
-          await documentsApi.uploadAttachment(docId, uploadFile);
+        if (primaryFile) {
+          await documentsApi.uploadPrimaryFile(docId, primaryFile);
         }
+        await uploadAllSupporting(docId, supportingFiles);
         await finalizeAfterCreate(docId);
         return docId;
       }
 
-      if (!uploadFile) throw new Error('Please upload a document file');
+      if (!primaryFile) throw new Error('Please upload the main document file');
       const notes = data.body_text_external?.trim();
       const notesHtml = notes ? externalNotesToHtml(notes) : undefined;
       const title = data.subject.trim() || data.file_name.trim();
-      const created = await documentsApi.uploadExternal(uploadFile, title, department, {
+      const created = await documentsApi.uploadExternal(primaryFile, title, department, {
         ref_number: ref,
         correspondence_direction: (data.correspondence_direction ?? 'incoming') as CorrespondenceDirection,
         urgency,
@@ -445,6 +506,8 @@ export default function CreateDocumentPage() {
         ...creationProfile,
       });
       const docId = created.document.id;
+
+      await uploadAllSupporting(docId, supportingFiles);
 
       if (recipients?.length) {
         for (const r of recipients) {
@@ -486,6 +549,22 @@ export default function CreateDocumentPage() {
       (!workflowTemplates?.length || !workflowTemplateId?.trim())) ||
     false;
 
+  const isInternal = documentType === 'internal';
+  const isExternal = documentType === 'external';
+  const catalogueTemplateEnabled = isInternal && documentSource === 'template';
+  const workflowTemplateEnabled = deliveryMode === 'workflow';
+  const documentInputEnabled = isInternal;
+  const showTemplateRow = catalogueTemplateEnabled || workflowTemplateEnabled;
+
+  const documentInputDisabledReason = isExternal
+    ? 'External documents always use file upload; input mode is fixed.'
+    : null;
+
+  const correspondenceEnabled = isExternal;
+  const correspondenceDisabledReason = isInternal
+    ? 'Correspondence direction applies to external documents only.'
+    : null;
+
   const validationAlert = useMemo(() => {
     if (form.formState.submitCount === 0) return null;
     const errs = { ...form.formState.errors };
@@ -507,8 +586,8 @@ export default function CreateDocumentPage() {
     }
     if (form.getValues('document_type') === 'external') {
       form.clearErrors(['document_template_id', 'body_html']);
-      if (!uploadFile) {
-        toast.error('Upload a PDF or Word file in the Document upload section before submitting.');
+      if (!primaryFile) {
+        toast.error('Upload the main document file before submitting.');
         return;
       }
       if (needsDepartmentPicker && !departmentOverride.trim()) {
@@ -517,6 +596,14 @@ export default function CreateDocumentPage() {
         );
         return;
       }
+    }
+    if (
+      form.getValues('document_type') === 'internal' &&
+      form.getValues('document_source') === 'manual_entry' &&
+      !primaryFile
+    ) {
+      toast.error('Upload the main document file for manual entry.');
+      return;
     }
     void form.handleSubmit((d) => submitMutation.mutate(d), onFormInvalid)();
   };
@@ -562,17 +649,86 @@ export default function CreateDocumentPage() {
                 <h3 id="section-mode" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Mode &amp; routing
                 </h3>
-                <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-                  <div className="space-y-2 min-w-0">
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5 min-w-0">
+                    <Label>Document type</Label>
+                    <Select
+                      value={documentType}
+                      onValueChange={(v) => {
+                        const next = v as CreateFormValues['document_type'];
+                        form.setValue('document_type', next, { shouldValidate: false });
+                        if (next === 'external') {
+                          applyExternalDocumentMode();
+                        } else {
+                          form.clearErrors(['correspondence_direction']);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="internal">Internal</SelectItem>
+                        <SelectItem value="external">External</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5 min-w-0">
+                    <Label>
+                      Correspondence{' '}
+                      {correspondenceEnabled ? <span className="text-destructive">*</span> : null}
+                    </Label>
+                    <Select
+                      disabled={!correspondenceEnabled}
+                      value={form.watch('correspondence_direction') || 'incoming'}
+                      onValueChange={(v) =>
+                        form.setValue('correspondence_direction', v as 'incoming' | 'outgoing', {
+                          shouldValidate: true,
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          'w-full',
+                          !correspondenceEnabled && 'opacity-60',
+                          form.formState.errors.correspondence_direction ? 'border-destructive' : undefined
+                        )}
+                      >
+                        <SelectValue
+                          placeholder={
+                            correspondenceEnabled ? undefined : 'Not applicable for internal'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="incoming">Incoming</SelectItem>
+                        <SelectItem value="outgoing">Outgoing</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {correspondenceDisabledReason && (
+                      <p className="text-xs text-muted-foreground">{correspondenceDisabledReason}</p>
+                    )}
+                    {form.formState.errors.correspondence_direction && (
+                      <p className="text-xs text-destructive">
+                        {form.formState.errors.correspondence_direction.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+                  <div className="space-y-2 min-w-0 flex-1">
                     <Label id="delivery-mode-label">Delivery</Label>
                     <div
                       role="radiogroup"
                       aria-labelledby="delivery-mode-label"
-                      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-4"
+                      className="flex flex-col gap-2 sm:flex-row sm:gap-3"
                     >
                       <label
                         className={cn(
-                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors flex-1 min-w-0',
                           deliveryMode === 'workflow'
                             ? 'border-primary bg-primary/5 text-foreground'
                             : 'border-border bg-background hover:bg-muted/40'
@@ -592,7 +748,7 @@ export default function CreateDocumentPage() {
                       </label>
                       <label
                         className={cn(
-                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                          'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors flex-1 min-w-0',
                           deliveryMode === 'direct_message'
                             ? 'border-primary bg-primary/5 text-foreground'
                             : 'border-border bg-background hover:bg-muted/40'
@@ -611,120 +767,165 @@ export default function CreateDocumentPage() {
                         <span className="font-medium">Direct message</span>
                       </label>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Workflow uses the standard approval path. Direct message targets a user and does not start
-                      workflow.
-                    </p>
                   </div>
 
-                  <div className="space-y-2 min-w-0">
+                  <div className="space-y-2 min-w-0 flex-1">
                     <Label id="document-source-label">Document input</Label>
-                    {documentType === 'internal' ? (
-                      <div
-                        role="radiogroup"
-                        aria-labelledby="document-source-label"
-                        className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-4"
+                    <div
+                      role="radiogroup"
+                      aria-labelledby="document-source-label"
+                      className={cn(
+                        'flex flex-col gap-2 sm:flex-row sm:gap-3',
+                        !documentInputEnabled && 'opacity-60 pointer-events-none'
+                      )}
+                    >
+                      <label
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors flex-1 min-w-0',
+                          documentInputEnabled ? 'cursor-pointer' : 'cursor-not-allowed',
+                          documentSource === 'template'
+                            ? 'border-primary bg-primary/5 text-foreground'
+                            : 'border-border bg-background',
+                          documentInputEnabled && documentSource !== 'template' && 'hover:bg-muted/40'
+                        )}
                       >
-                        <label
-                          className={cn(
-                            'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
-                            documentSource === 'template'
-                              ? 'border-primary bg-primary/5 text-foreground'
-                              : 'border-border bg-background hover:bg-muted/40'
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name="document_source"
-                            value="template"
-                            className="h-4 w-4 shrink-0 accent-primary"
-                            checked={documentSource === 'template'}
-                            onChange={() =>
-                              form.setValue('document_source', 'template', { shouldValidate: true })
-                            }
-                          />
-                          <span className="font-medium">Use template</span>
-                        </label>
-                        <label
-                          className={cn(
-                            'flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
-                            documentSource === 'manual_entry'
-                              ? 'border-primary bg-primary/5 text-foreground'
-                              : 'border-border bg-background hover:bg-muted/40'
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name="document_source"
-                            value="manual_entry"
-                            className="h-4 w-4 shrink-0 accent-primary"
-                            checked={documentSource === 'manual_entry'}
-                            onChange={() =>
-                              form.setValue('document_source', 'manual_entry', { shouldValidate: true })
-                            }
-                          />
-                          <span className="font-medium">Manual entry</span>
-                        </label>
-                      </div>
-                    ) : (
-                      <div
-                        role="radiogroup"
-                        aria-labelledby="document-source-label"
-                        className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground"
+                        <input
+                          type="radio"
+                          name="document_source"
+                          value="template"
+                          className="h-4 w-4 shrink-0 accent-primary"
+                          checked={documentSource === 'template'}
+                          disabled={!documentInputEnabled}
+                          onChange={() =>
+                            form.setValue('document_source', 'template', { shouldValidate: true })
+                          }
+                        />
+                        <span className="font-medium">Use template</span>
+                      </label>
+                      <label
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors flex-1 min-w-0',
+                          documentInputEnabled ? 'cursor-pointer' : 'cursor-not-allowed',
+                          documentSource === 'manual_entry'
+                            ? 'border-primary bg-primary/5 text-foreground'
+                            : 'border-border bg-background',
+                          documentInputEnabled &&
+                            documentSource !== 'manual_entry' &&
+                            'hover:bg-muted/40'
+                        )}
                       >
-                        External documents use <span className="font-medium text-foreground">manual file upload</span>{' '}
-                        only.
-                      </div>
+                        <input
+                          type="radio"
+                          name="document_source"
+                          value="manual_entry"
+                          className="h-4 w-4 shrink-0 accent-primary"
+                          checked={documentSource === 'manual_entry'}
+                          disabled={!documentInputEnabled}
+                          onChange={() =>
+                            form.setValue('document_source', 'manual_entry', { shouldValidate: true })
+                          }
+                        />
+                        <span className="font-medium">Manual entry</span>
+                      </label>
+                    </div>
+                    {documentInputDisabledReason && (
+                      <p className="text-xs text-muted-foreground">{documentInputDisabledReason}</p>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Template loads body text from a catalogue entry. Manual entry starts with an empty editor; file
-                      upload below is optional.
-                    </p>
                   </div>
                 </div>
 
-                {deliveryMode === 'workflow' && (
-                  <div className="space-y-2 max-w-2xl pt-1">
-                    <Label>
-                      Workflow <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={workflowTemplateId?.trim() ? workflowTemplateId : undefined}
-                      onValueChange={(v) =>
-                        form.setValue('workflow_template_id', v, { shouldValidate: true })
-                      }
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          'w-full max-w-2xl',
-                          form.formState.errors.workflow_template_id ? 'border-destructive' : undefined
+                {showTemplateRow && (
+                  <div
+                    className={cn(
+                      'grid gap-4',
+                      catalogueTemplateEnabled && workflowTemplateEnabled
+                        ? 'sm:grid-cols-2'
+                        : 'max-w-xl'
+                    )}
+                  >
+                    {workflowTemplateEnabled && (
+                      <div className="space-y-1.5 min-w-0">
+                        <Label>
+                          Workflow template <span className="text-destructive">*</span>
+                        </Label>
+                        <Select
+                          value={workflowTemplateId?.trim() ? workflowTemplateId : undefined}
+                          onValueChange={(v) =>
+                            form.setValue('workflow_template_id', v, { shouldValidate: true })
+                          }
+                        >
+                          <SelectTrigger
+                            className={cn(
+                              'w-full',
+                              form.formState.errors.workflow_template_id ? 'border-destructive' : undefined
+                            )}
+                          >
+                            <SelectValue placeholder="Select a workflow" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {workflowTemplates?.map((w) => (
+                              <SelectItem key={w.id} value={w.id}>
+                                {w.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {form.formState.errors.workflow_template_id && (
+                          <p className="text-xs text-destructive">
+                            {form.formState.errors.workflow_template_id.message}
+                          </p>
                         )}
-                      >
-                        <SelectValue placeholder="Select a workflow" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {workflowTemplates?.map((w) => (
-                          <SelectItem key={w.id} value={w.id}>
-                            {w.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {form.formState.errors.workflow_template_id && (
-                      <p className="text-xs text-destructive">
-                        {form.formState.errors.workflow_template_id.message}
-                      </p>
+                        {!workflowTemplates?.length && (
+                          <p className="text-xs text-destructive">
+                            No workflow templates found. Create one under Workflows first.
+                          </p>
+                        )}
+                      </div>
                     )}
-                    {!workflowTemplates?.length && (
-                      <p className="text-xs text-destructive">
-                        No workflow templates found. Create one under Workflows before submitting into a workflow.
-                      </p>
+
+                    {catalogueTemplateEnabled && (
+                      <div className="space-y-1.5 min-w-0">
+                        <Label>
+                          Catalogue template <span className="text-destructive">*</span>
+                        </Label>
+                        <Select
+                          value={documentTemplateId?.trim() ? documentTemplateId : undefined}
+                          onValueChange={(v) => {
+                            lastAppliedDocumentTemplateId.current = null;
+                            form.setValue('document_template_id', v, { shouldValidate: true });
+                          }}
+                        >
+                          <SelectTrigger
+                            className={cn(
+                              'w-full',
+                              form.formState.errors.document_template_id ? 'border-destructive' : undefined
+                            )}
+                          >
+                            <SelectValue placeholder="Select a catalogue template" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {documentTemplates?.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.name} ({t.status})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {form.formState.errors.document_template_id && (
+                          <p className="text-xs text-destructive">
+                            {form.formState.errors.document_template_id.message}
+                          </p>
+                        )}
+                        {!documentTemplates?.length && (
+                          <p className="text-xs text-destructive">
+                            No catalogue templates found. Add one under Template management.
+                          </p>
+                        )}
+                      </div>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      This template is started after you submit the document into the workflow path.
-                    </p>
                   </div>
                 )}
+
               </section>
 
               {/* Document profile */}
@@ -767,132 +968,23 @@ export default function CreateDocumentPage() {
                   </div>
                 )}
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="document_date">Document date</Label>
-                    <Input
-                      id="document_date"
-                      type="date"
-                      error={!!form.formState.errors.document_date}
-                      {...form.register('document_date')}
-                    />
-                    {form.formState.errors.document_date && (
-                      <p className="text-xs text-destructive">{form.formState.errors.document_date.message}</p>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Document receive date</Label>
-                    <Input value={receiveDateLabel} readOnly disabled className="bg-muted/60" />
-                    <p className="text-xs text-muted-foreground">Set automatically to today&apos;s date.</p>
-                  </div>
-                </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
-              <div className="space-y-1.5 min-w-0">
-                <Label>Type</Label>
-                <Select
-                  value={documentType}
-                  onValueChange={(v) => {
-                    const next = v as CreateFormValues['document_type'];
-                    form.setValue('document_type', next, { shouldValidate: false });
-                    if (next === 'external') {
-                      applyExternalDocumentMode();
-                    } else {
-                      form.clearErrors(['correspondence_direction']);
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="internal">Internal</SelectItem>
-                    <SelectItem value="external">External</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5 min-w-0">
-                {documentType === 'internal' && documentSource === 'template' ? (
-                  <>
-                    <Label>
-                      Document template <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={documentTemplateId?.trim() ? documentTemplateId : undefined}
-                      onValueChange={(v) => {
-                        lastAppliedDocumentTemplateId.current = null;
-                        form.setValue('document_template_id', v, { shouldValidate: true });
-                      }}
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          'w-full',
-                          form.formState.errors.document_template_id ? 'border-destructive' : undefined
-                        )}
-                      >
-                        <SelectValue placeholder="Select a catalogue template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {documentTemplates?.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name} ({t.status})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {form.formState.errors.document_template_id && (
-                      <p className="text-xs text-destructive">
-                        {form.formState.errors.document_template_id.message}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Body updates when you change template (your edits are replaced).
-                    </p>
-                  </>
-                ) : documentType === 'internal' ? (
-                  <>
-                    <Label className="text-muted-foreground">Document template</Label>
-                    <div className="flex min-h-[36px] w-full items-center rounded-md border border-dashed border-muted-foreground/25 bg-muted/30 px-3 text-sm text-muted-foreground">
-                      Manual entry — empty editor, no catalogue template
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Label>
-                      Correspondence <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={form.watch('correspondence_direction') || 'incoming'}
-                      onValueChange={(v) =>
-                        form.setValue('correspondence_direction', v as 'incoming' | 'outgoing', {
-                          shouldValidate: true,
-                        })
-                      }
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          'w-full',
-                          form.formState.errors.correspondence_direction ? 'border-destructive' : undefined
-                        )}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="incoming">Incoming</SelectItem>
-                        <SelectItem value="outgoing">Outgoing</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {form.formState.errors.correspondence_direction && (
-                      <p className="text-xs text-destructive">
-                        {form.formState.errors.correspondence_direction.message}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Registry tracking ID (NHIA/IN/… or NHIA/OUT/…) is assigned automatically.
-                    </p>
-                  </>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="document_date">Document date</Label>
+                <Input
+                  id="document_date"
+                  type="date"
+                  error={!!form.formState.errors.document_date}
+                  {...form.register('document_date')}
+                />
+                {form.formState.errors.document_date && (
+                  <p className="text-xs text-destructive">{form.formState.errors.document_date.message}</p>
                 )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Document receive date</Label>
+                <Input value={receiveDateLabel} readOnly disabled className="bg-muted/60" />
+                <p className="text-xs text-muted-foreground">Set automatically to today&apos;s date.</p>
               </div>
             </div>
 
@@ -920,25 +1012,40 @@ export default function CreateDocumentPage() {
                   Content
                 </h3>
             <div className="space-y-2">
-              <Label>Body</Label>
-              {documentType === 'internal' ? (
+              <Label>
+                {documentType === 'internal' && documentSource === 'template'
+                  ? 'Memo body'
+                  : documentType === 'internal'
+                    ? 'Cover notes (optional)'
+                    : 'Cover notes (optional)'}
+              </Label>
+              {documentType === 'internal' && documentSource === 'template' ? (
                 <MemoEditor
-                  key={documentSource === 'manual_entry' ? 'body-manual' : `body-template-${documentTemplateId || 'none'}`}
+                  key={`body-template-${documentTemplateId || 'none'}`}
                   hideLetterhead
-                  startBlank={documentSource === 'manual_entry'}
-                  editorMinHeight={documentSource === 'manual_entry' ? 560 : 400}
+                  startBlank={false}
+                  editorMinHeight={400}
                   value={bodyHtml ?? ''}
                   onChange={(val) => form.setValue('body_html', val)}
                 />
               ) : (
                 <textarea
                   className={cn(
-                    'min-h-[160px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+                    'min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
                     'placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                   )}
-                  placeholder="Optional cover note or summary for this external document"
+                  placeholder={
+                    documentType === 'internal'
+                      ? 'Optional notes to accompany the uploaded main document'
+                      : 'Optional cover note or summary for this external document'
+                  }
                   {...form.register('body_text_external')}
                 />
+              )}
+              {documentType === 'internal' && documentSource === 'manual_entry' && (
+                <p className="text-xs text-muted-foreground">
+                  Upload the main document in the Document files section below. Supporting documents are optional.
+                </p>
               )}
             </div>
               </section>
@@ -962,12 +1069,12 @@ export default function CreateDocumentPage() {
             </div>
               </section>
 
-              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-files">
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-classification">
                 <h3
-                  id="section-files"
+                  id="section-classification"
                   className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                 >
-                  Classification &amp; attachments
+                  Classification
                 </h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -1030,11 +1137,26 @@ export default function CreateDocumentPage() {
                 <Input id="ref_code" placeholder="Optional — auto if left blank" {...form.register('ref_code')} />
               </div>
             </div>
+              </section>
+
+              <section className="space-y-4 px-4 py-6 sm:px-6" aria-labelledby="section-files">
+                <h3
+                  id="section-files"
+                  className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  Document files
+                </h3>
 
             <div className="space-y-2">
-              <Label>Document upload</Label>
-              <input {...getInputProps()} className="sr-only" />
-              {uploadFile ? (
+              <Label>
+                Main document{' '}
+                {documentType === 'external' ||
+                (documentType === 'internal' && documentSource === 'manual_entry') ? (
+                  <span className="text-destructive">*</span>
+                ) : null}
+              </Label>
+              <input {...getPrimaryInputProps()} className="sr-only" />
+              {primaryFile ? (
                 <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <div
@@ -1044,20 +1166,20 @@ export default function CreateDocumentPage() {
                       <FileText className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium truncate" title={uploadFile.name}>
-                        {uploadFile.name}
+                      <p className="text-sm font-medium truncate" title={primaryFile.name}>
+                        {primaryFile.name}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {uploadFile.size >= 1024 * 1024
-                          ? `${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB`
-                          : `${(uploadFile.size / 1024).toFixed(1)} KB`}
+                        {primaryFile.size >= 1024 * 1024
+                          ? `${(primaryFile.size / (1024 * 1024)).toFixed(1)} MB`
+                          : `${(primaryFile.size / 1024).toFixed(1)} KB`}
                         {' · '}
-                        PDF or DOCX
+                        PDF or DOCX · shown on document view
                       </p>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <Button type="button" variant="outline" size="sm" onClick={() => openFilePicker()}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => openPrimaryPicker()}>
                       Replace file
                     </Button>
                     <Button
@@ -1065,7 +1187,7 @@ export default function CreateDocumentPage() {
                       variant="ghost"
                       size="sm"
                       className="text-muted-foreground hover:text-destructive"
-                      onClick={clearUploadFile}
+                      onClick={clearPrimaryFile}
                     >
                       <X className="h-4 w-4 mr-1" />
                       Remove
@@ -1074,23 +1196,78 @@ export default function CreateDocumentPage() {
                 </div>
               ) : (
                 <div
-                  {...getRootProps()}
+                  {...getPrimaryRootProps()}
                   className={cn(
                     'border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors',
-                    isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+                    isPrimaryDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
                   )}
                 >
                   <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                  <p className="text-sm font-medium">Drop a file here or click to browse</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    PDF or DOCX · max {documentType === 'internal' ? '5' : '10'} MB
-                    {documentType === 'internal' ? ' (optional attachment)' : ''}
-                  </p>
+                  <p className="text-sm font-medium">Drop the main document here or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">PDF or DOCX · max 10 MB</p>
                 </div>
               )}
-              {documentType === 'external' && !uploadFile && (
-                <p className="text-xs text-muted-foreground">External documents require an uploaded file.</p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <Label>Supporting documents (optional)</Label>
+              <input {...getSupportingInputProps()} className="sr-only" />
+              <div
+                {...getSupportingRootProps()}
+                className={cn(
+                  'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors',
+                  isSupportingDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+                )}
+              >
+                <Paperclip className="h-7 w-7 mx-auto text-muted-foreground mb-2" />
+                <p className="text-sm font-medium">Add supporting documents</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Any file type · max 5 MB each · you can add more than one
+                </p>
+              </div>
+              {supportingFiles.length > 0 && (
+                <ul className="space-y-2 pt-2">
+                  {supportingFiles.map((file, index) => (
+                    <li
+                      key={`${file.name}-${file.size}-${index}`}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                    >
+                      <span className="truncate flex items-center gap-2 min-w-0">
+                        <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="truncate" title={file.name}>
+                          {file.name}
+                        </span>
+                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-muted-foreground hidden sm:inline">
+                          {file.size >= 1024 * 1024
+                            ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+                            : `${(file.size / 1024).toFixed(1)} KB`}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => removeSupportingFile(index)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1"
+                onClick={() => openSupportingPicker()}
+              >
+                <Paperclip className="h-4 w-4" />
+                Add another file
+              </Button>
             </div>
               </section>
 

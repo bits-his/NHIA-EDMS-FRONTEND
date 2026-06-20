@@ -42,6 +42,7 @@ const ACTION_LABEL: Record<string, string> = {
   edit_forward: 'Note',
   approve_forward: 'Approved & forwarded',
   request_info: 'Requested information',
+  reverse: 'Reversed to sender',
   final_approve: 'Final approval',
   final_approval: 'Final approval',
   attach_send: 'Attach & send',

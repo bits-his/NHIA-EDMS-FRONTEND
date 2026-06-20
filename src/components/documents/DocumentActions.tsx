@@ -78,6 +78,7 @@ export function DocumentActions({
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmActionType | null>(null);
   const [commentDialog, setCommentDialog] = useState<CommentDialogKind | null>(null);
   const [comment, setComment] = useState('');
+  const [appendSignature, setAppendSignature] = useState(false);
   const [submitForReviewLoading, setSubmitForReviewLoading] = useState(false);
 
   const actions = getDocumentActions(document.status, roles, actionContext, workflowStepActionType);
@@ -146,15 +147,21 @@ export function DocumentActions({
   });
 
   const approveAndForwardMutation = useMutation({
-    mutationFn: async (commentText: string) => {
+    mutationFn: async ({
+      commentText,
+      appendSignature: appendSig,
+    }: {
+      commentText: string;
+      appendSignature: boolean;
+    }) => {
       const note = commentText.trim() || undefined;
-      await documentsApi.approveForward(document.id, note);
+      await documentsApi.approveForward(document.id, note, undefined, { appendSignature: appendSig });
       if (workflowInstanceId && canAdvanceWorkflow) {
         return workflowApi.advance(workflowInstanceId);
       }
       return null;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       if (data?.workflow) {
         if (data.workflow.status === 'completed') {
           toast.success('Approved and forwarded — workflow completed.');
@@ -166,11 +173,16 @@ export function DocumentActions({
         }
         invalidateAfterWorkflow(data.workflow.id);
       } else {
-        toast.success('Approved and sent — your e-signature was appended to the memo.');
+        toast.success(
+          variables.appendSignature
+            ? 'Approved and sent — your e-signature was appended to the memo.'
+            : 'Approved and sent.'
+        );
       }
       invalidateDoc();
       setCommentDialog(null);
       setComment('');
+      setAppendSignature(false);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -199,39 +211,57 @@ export function DocumentActions({
   });
 
   const finalApproveAndAdvanceMutation = useMutation({
-    mutationFn: async (commentText: string) => {
+    mutationFn: async ({
+      commentText,
+      appendSignature: appendSig,
+    }: {
+      commentText: string;
+      appendSignature: boolean;
+    }) => {
       const note = commentText.trim() || undefined;
-      await documentsApi.finalApprove(document.id, note);
+      await documentsApi.finalApprove(document.id, note, { appendSignature: appendSig });
       if (workflowInstanceId && canAdvanceWorkflow) {
         return workflowApi.advance(workflowInstanceId);
       }
       return null;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       if (data?.workflow) {
         if (data.workflow.status === 'completed') {
           toast.success(
-            'Final approval recorded — process archived (read-only) and workflow completed.'
+            variables.appendSignature
+              ? 'Final approval recorded — signature appended, process archived (read-only), and workflow completed.'
+              : 'Final approval recorded — process archived (read-only) and workflow completed.'
           );
         } else {
-          toast.success('Process archived (read-only); workflow advanced.');
+          toast.success(
+            variables.appendSignature
+              ? 'Signature appended; process archived (read-only); workflow advanced.'
+              : 'Process archived (read-only); workflow advanced.'
+          );
         }
         if (data.warnings?.length) {
           toast.warning('Some notifications or tasks could not be updated.');
         }
         invalidateAfterWorkflow(data.workflow.id);
       } else {
-        toast.success('Process archived and is now read-only.');
+        toast.success(
+          variables.appendSignature
+            ? 'Process archived with your signature appended — now read-only.'
+            : 'Process archived and is now read-only.'
+        );
       }
       invalidateDoc();
       setCommentDialog(null);
       setComment('');
+      setAppendSignature(false);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const openCommentDialog = (kind: CommentDialogKind) => {
     setComment('');
+    setAppendSignature(false);
     setCommentDialog(kind);
   };
 
@@ -281,10 +311,10 @@ export function DocumentActions({
         });
         break;
       case 'approveForward':
-        approveAndForwardMutation.mutate(c);
+        approveAndForwardMutation.mutate({ commentText: c, appendSignature });
         break;
       case 'finalApprove':
-        finalApproveAndAdvanceMutation.mutate(c);
+        finalApproveAndAdvanceMutation.mutate({ commentText: c, appendSignature });
         break;
       case 'reviewForward':
         reviewForwardMutation.mutate(c);
@@ -323,13 +353,13 @@ export function DocumentActions({
     approveForward: {
       title: 'Approve and send',
       description:
-        'Records approval, appends your e-signature to the memo (set up under Settings → E-signature), and sends the process to the next step when a workflow applies. Optional note.',
+        'Records approval and sends the process to the next step when a workflow applies. Optionally append your e-signature from Settings, or send without a signature stamp.',
       placeholder: 'Optional note…',
     },
     finalApprove: {
       title: 'Final approval',
       description:
-        'Final approval closes this chain. The process will become read-only and archived, and no further recipients can act on it. Your e-signature is appended when configured in Settings. Optional note is stored on the action record.',
+        'Final approval closes this chain. The process will become read-only and archived, and no further recipients can act on it. You may append your e-signature or complete without one.',
       placeholder: 'Optional note…',
     },
     reviewForward: {
@@ -357,6 +387,9 @@ export function DocumentActions({
     (!isDirectMessage && !suppressWorkflowStepActions && actions.canEditForward);
 
   if (!anyPrimaryButton && !actions.canEdit) return null;
+
+  const showSignatureOption =
+    commentDialog === 'approveForward' || commentDialog === 'finalApprove';
 
   const dialogLoading =
     commentDialog === 'approveForward'
@@ -495,6 +528,22 @@ export function DocumentActions({
             </DialogTitle>
             <DialogDescription>{commentDialog ? dialogCopy[commentDialog].description : ''}</DialogDescription>
           </DialogHeader>
+          {showSignatureOption && (
+            <label className="flex items-start gap-2.5 rounded-md border border-border/70 bg-muted/20 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-border"
+                checked={appendSignature}
+                onChange={(e) => setAppendSignature(e.target.checked)}
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium text-foreground">Append my e-signature</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  When checked, your saved signature from Settings is stamped on the memo before sending.
+                </span>
+              </span>
+            </label>
+          )}
           <Textarea
             placeholder={commentDialog ? dialogCopy[commentDialog].placeholder : ''}
             value={comment}
